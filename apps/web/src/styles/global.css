@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@theme {
+  /* Marca */
+  --color-primary: #5B21B6;
+  --color-primary-hover: #4C1D95;
+  --color-primary-soft: #F3E8FF;
+
+  /* Semánticos */
+  --color-sos: #E11D48;
+  --color-sos-soft: #FFE4E6;
+  --color-secondary: #0D9488;
+  --color-secondary-soft: #CCFBF1;
+
+  /* Superficies y Bordes */
+  --color-bg-canvas: #F8FAFC;
+  --color-bg-surface: #FFFFFF;
+  --color-border: #E2E8F0;
+
+  /* Tipografía */
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94A3B8;
+
+  /* Familias Tipográficas */
+  --font-display: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+  --target-size: 24px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --target-size: 44px;
+  }
+}
+
+@layer base {
+  html {
+    font-family: var(--font-body);
+    background-color: var(--color-bg-canvas);
+    color: var(--color-text-primary);
+  }
+
+  body {
+    margin: 0;
+    min-block-size: 100dvh;
+    background-color: var(--color-bg-canvas);
+    color: var(--color-text-primary);
+    overflow-wrap: anywhere;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  p,
+  li {
+    text-wrap: pretty;
+  }
+
+  :where(a:any-link, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  :where(button, select, textarea, input:not([type="checkbox"], [type="radio"]), nav a) {
+    min-block-size: var(--target-size);
+  }
+
+  @media (max-width: 767px) {
+    input,
+    textarea,
+    select {
+      font-size: max(16px, 1rem);
+    }
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+.skip-link:focus-visible {
+  position: fixed;
+  inset-block-start: 0.75rem;
+  inset-inline-start: 0.75rem;
+  z-index: 100;
+  padding: 0.625rem 1rem;
+  border-radius: 0.5rem;
+  background-color: var(--color-primary);
+  color: #FFFFFF;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.mobile-header-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.mobile-bottom-safe {
+  padding-bottom: max(0.375rem, env(safe-area-inset-bottom, 0px));
+}
