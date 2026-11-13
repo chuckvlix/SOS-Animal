@@ -79,7 +79,10 @@ class Complaint(SQLModel, table=True):
     )
 
     offense_category: OffenseCategory | None = Relationship(back_populates="complaints")
-    evidences: list["ComplaintEvidence"] = Relationship(back_populates="complaint")
+    evidences: list["ComplaintEvidence"] = Relationship(
+        back_populates="complaint",
+        cascade_delete=True,
+    )
 
 
 class ComplaintEvidence(SQLModel, table=True):
@@ -88,7 +91,11 @@ class ComplaintEvidence(SQLModel, table=True):
     __tablename__ = "complaint_evidences"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    complaint_id: uuid.UUID = Field(foreign_key="complaints.id", index=True)
+    complaint_id: uuid.UUID = Field(
+        foreign_key="complaints.id",
+        ondelete="CASCADE",
+        index=True,
+    )
     evidence_type: EvidenceType = Field(
         sa_type=str_enum_type(EvidenceType),
     )

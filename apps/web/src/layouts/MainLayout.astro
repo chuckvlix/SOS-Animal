@@ -97,7 +97,7 @@ function isActiveRoute(href: string): boolean {
 
     <!-- Mobile Top Header (< 1024px) -->
     <header
-      class="mobile-header-safe fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-bg-surface px-4 lg:hidden"
+      class="mobile-header-safe fixed inset-x-0 top-0 z-30 flex min-h-14 items-center justify-between border-b border-border bg-bg-surface lg:hidden"
     >
       <a href="/" class="flex items-center gap-2.5 no-underline">
         <svg class="h-7 w-7 shrink-0" viewBox="0 0 32 32" fill="none" aria-hidden="true">
@@ -163,7 +163,7 @@ function isActiveRoute(href: string): boolean {
                         item.isSos
                           ? active
                             ? "border-s-4 border-sos bg-sos text-white font-semibold"
-                            : "bg-sos-soft text-sos hover:bg-sos hover:text-white font-semibold"
+                            : "bg-sos-soft text-sos-text hover:bg-sos hover:text-white font-semibold"
                           : active
                             ? "border-s-4 border-primary bg-primary-soft text-primary font-semibold"
                             : "text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
@@ -203,7 +203,7 @@ function isActiveRoute(href: string): boolean {
     <main
       id="main-content"
       tabindex="-1"
-      class="min-h-dvh pt-14 pb-24 lg:ps-[260px] lg:pt-0 lg:pb-8"
+      class="min-h-dvh pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-24 lg:ps-[260px] lg:pt-0 lg:pb-8"
     >
       <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
         <slot />
@@ -213,7 +213,7 @@ function isActiveRoute(href: string): boolean {
     <!-- Mobile Fixed Bottom Navigation Bar (< 1024px) -->
     <nav
       aria-label="Acceso rápido móvil"
-      class="mobile-bottom-safe fixed inset-x-0 bottom-0 z-30 border-t border-border bg-bg-surface px-2 pt-1 lg:hidden"
+      class="mobile-bottom-safe fixed inset-x-0 bottom-0 z-30 border-t border-border bg-bg-surface pt-1 lg:hidden"
     >
       <ul class="m-0 grid list-none grid-cols-5 items-end gap-1 p-0">
         {

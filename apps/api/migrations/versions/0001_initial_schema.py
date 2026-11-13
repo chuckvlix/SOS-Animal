@@ -204,6 +204,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["complaint_id"],
             ["complaints.id"],
+            ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("object_key"),

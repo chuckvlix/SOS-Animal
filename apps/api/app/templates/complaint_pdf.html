@@ -150,6 +150,12 @@
           <td class="label">Ubicación del hecho:</td>
           <td>{{ incident_address }}</td>
         </tr>
+        {% if latitude is not none and longitude is not none %}
+        <tr>
+          <td class="label">Coordenadas GPS:</td>
+          <td>{{ latitude }}, {{ longitude }}</td>
+        </tr>
+        {% endif %}
       </table>
       <p>{{ description }}</p>
     </section>

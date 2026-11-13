@@ -1,8 +1,11 @@
-from fastapi import APIRouter, FastAPI
+import sqlalchemy as sa
+from fastapi import APIRouter, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
+from app.core.database import SessionDep
 from app.modules.auth.router import router as auth_router
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.complaints.router import router as complaints_router
@@ -16,6 +19,13 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
+
+
+class ReadinessResponse(BaseModel):
+    """Database readiness check response schema."""
+
+    status: str
+    database: str
 
 
 def create_app() -> FastAPI:
@@ -46,6 +56,18 @@ def create_app() -> FastAPI:
             service=settings.APP_NAME,
             version=settings.APP_VERSION,
         )
+
+    @api_router.get("/ready", response_model=ReadinessResponse, tags=["Health"])
+    def readiness_check(session: SessionDep) -> ReadinessResponse:
+        """Verify database connectivity before marking the API ready for traffic."""
+        try:
+            session.execute(sa.text("SELECT 1"))
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database unavailable",
+            ) from exc
+        return ReadinessResponse(status="ready", database="ok")
 
     api_router.include_router(auth_router)
     api_router.include_router(complaints_router)

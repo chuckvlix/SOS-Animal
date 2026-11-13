@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -34,9 +34,11 @@ def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def require_role(allowed_roles: list[UserRole]) -> Callable[[CurrentUser], User]:
+def require_role(allowed_roles: Sequence[UserRole | str]) -> Callable[[CurrentUser], User]:
     """Build a FastAPI dependency enforcing RBAC membership on endpoints."""
-    allowed_set = frozenset(allowed_roles)
+    allowed_set = frozenset(UserRole(role) for role in allowed_roles)
+    if not allowed_set:
+        raise ValueError("require_role requires at least one allowed role")
 
     def _role_checker(current_user: CurrentUser) -> User:
         if current_user.role not in allowed_set:

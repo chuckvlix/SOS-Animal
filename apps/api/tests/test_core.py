@@ -1,14 +1,20 @@
 from collections.abc import Generator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
+import jwt as pyjwt
 import pytest
+import sqlalchemy as sa
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from pydantic import ValidationError
+from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
 
+from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.core.dependencies import require_role
 from app.core.security import (
@@ -21,9 +27,19 @@ from app.core.storage import (
     ALLOWED_EVIDENCE_MIME_TYPES,
     PRESIGNED_UPLOAD_EXPIRY_SECONDS,
     UploadValidationError,
+    build_object_key,
+    create_s3_client,
     generate_presigned_upload,
+    validate_upload_metadata,
 )
 from app.modules.auth.models import User, UserRole
+from app.modules.complaints.models import (
+    Complaint,
+    ComplaintEvidence,
+    EvidenceType,
+    OffenseCategory,
+    OffenseMainType,
+)
 
 
 class FakeS3Client:
@@ -148,6 +164,7 @@ def test_presigned_upload_allows_whitelisted_mime_types(mime_type: str) -> None:
     assert result.object_key.startswith("evidences/")
     assert stub.calls[0]["ExpiresIn"] == 180
     assert stub.calls[0]["ClientMethod"] == "put_object"
+    assert stub.calls[0]["Params"]["ContentLength"] == 1024  # type: ignore[index]
 
 
 def test_presigned_upload_rejects_disallowed_mime_and_invalid_sizes() -> None:
@@ -162,6 +179,10 @@ def test_presigned_upload_rejects_disallowed_mime_and_invalid_sizes() -> None:
         generate_presigned_upload(mime_type="image/jpeg", file_size_bytes=0, client=stub)
     assert empty_exc.value.status_code == 400
 
+    with pytest.raises(UploadValidationError) as bool_exc:
+        generate_presigned_upload(mime_type="image/jpeg", file_size_bytes=True, client=stub)
+    assert bool_exc.value.status_code == 400
+
     with pytest.raises(UploadValidationError) as large_exc:
         generate_presigned_upload(
             mime_type="video/mp4",
@@ -171,9 +192,171 @@ def test_presigned_upload_rejects_disallowed_mime_and_invalid_sizes() -> None:
     assert large_exc.value.status_code == 413
 
 
+def test_storage_prefix_sanitization_and_runtime_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify prefix traversal rejection and dynamic runtime limit evaluation."""
+    with pytest.raises(UploadValidationError):
+        build_object_key("", "image/jpeg")
+    with pytest.raises(UploadValidationError):
+        build_object_key("../secrets", "image/jpeg")
+    with pytest.raises(UploadValidationError) as mime_exc:
+        build_object_key("evidences", "image/svg+xml")
+    assert mime_exc.value.status_code == 415
+
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_BYTES", "100")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(UploadValidationError) as limit_exc:
+            validate_upload_metadata("image/jpeg", 500)
+        assert limit_exc.value.status_code == 413
+    finally:
+        get_settings.cache_clear()
+
+    https_client = create_s3_client("https://minio.example.com")
+    assert https_client._endpoint.host.startswith("https://")  # type: ignore[attr-defined]
+
+
+def test_settings_rejects_insecure_production_secret_key() -> None:
+    """Ensure staging and production environments reject default or weak SECRET_KEY."""
+    with pytest.raises(ValidationError):
+        Settings(ENVIRONMENT="production")
+
+    with pytest.raises(ValidationError):
+        Settings(ENVIRONMENT="staging", SECRET_KEY="short-key")
+
+    valid_prod = Settings(
+        ENVIRONMENT="production",
+        SECRET_KEY="a-very-strong-production-secret-key-over-32-chars",
+    )
+    assert valid_prod.ENVIRONMENT == "production"
+
+
+def test_security_hardening_edge_cases() -> None:
+    """Verify malformed hashes, empty passwords, and invalid JWT claims are safely rejected."""
+    assert verify_password("secret", "not-a-valid-hash") is False
+    assert verify_password("secret", "") is False
+
+    with pytest.raises(ValueError):
+        hash_password("")
+
+    settings_obj = get_settings()
+    empty_sub_token = create_access_token(subject="", role=UserRole.CIUDADANO)
+    with pytest.raises(ValueError):
+        decode_access_token(empty_sub_token)
+
+    bogus_role_token = pyjwt.encode(
+        {
+            "sub": str(uuid4()),
+            "role": "super_root",
+            "exp": datetime.now(UTC) + timedelta(minutes=5),
+        },
+        settings_obj.SECRET_KEY,
+        algorithm=settings_obj.JWT_ALGORITHM,
+    )
+    with pytest.raises(ValueError):
+        decode_access_token(bogus_role_token)
+
+    bool_exp_token = pyjwt.encode(
+        {"sub": str(uuid4()), "role": "admin", "exp": True},
+        settings_obj.SECRET_KEY,
+        algorithm=settings_obj.JWT_ALGORITHM,
+    )
+    with pytest.raises(ValueError):
+        decode_access_token(bool_exp_token)
+
+    with pytest.raises(ValueError):
+        require_role([])
+    with pytest.raises(ValueError):
+        require_role(["invalid_role"])
+
+
+def test_complaint_cascade_delete_removes_evidences() -> None:
+    """Verify deleting a draft complaint cascades cleanly to ComplaintEvidence rows."""
+    engine = create_engine("sqlite://")
+
+    @sa.event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection: object, _record: object) -> None:
+        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        user = User(
+            full_name="Denunciante Prueba",
+            email="denunciante@example.com",
+            password_hash=hash_password("secret123"),
+        )
+        category = OffenseCategory(
+            main_type=OffenseMainType.MALTRATO,
+            subtype_name="Maltrato físico",
+            legal_basis="Art. 350 bis C.P.",
+        )
+        session.add(user)
+        session.add(category)
+        session.commit()
+        session.refresh(user)
+        session.refresh(category)
+        assert category.id is not None
+
+        complaint = Complaint(
+            user_id=user.id,
+            offense_category_id=category.id,
+            incident_date=datetime.now(UTC),
+            incident_address="Sucre",
+            description="Prueba de cascada",
+        )
+        session.add(complaint)
+        session.commit()
+        session.refresh(complaint)
+
+        evidence = ComplaintEvidence(
+            complaint_id=complaint.id,
+            evidence_type=EvidenceType.FOTO,
+            object_key="evidences/cascade-test.jpg",
+            mime_type="image/jpeg",
+            file_size_bytes=1024,
+        )
+        session.add(evidence)
+        session.commit()
+
+        session.delete(complaint)
+        session.commit()
+
+        remaining = session.exec(select(ComplaintEvidence)).all()
+        assert remaining == []
+
+
 def test_complaint_pdf_template_uses_correct_legal_terminology() -> None:
-    """Ensure legal PDF template uses 'Documento de Denuncia' and never 'Memorial'."""
-    template_path = Path(__file__).resolve().parents[1] / "app" / "templates" / "complaint_pdf.html"
-    content = template_path.read_text(encoding="utf-8")
+    """Ensure PDF template uses 'Documento de Denuncia', escapes HTML, and omits 'Memorial'."""
+    templates_dir = Path(__file__).resolve().parents[1] / "app" / "templates"
+    content = (templates_dir / "complaint_pdf.html").read_text(encoding="utf-8")
     assert "DOCUMENTO DE DENUNCIA" in content
     assert "memorial" not in content.lower()
+
+    env = Environment(
+        loader=FileSystemLoader(str(templates_dir)),
+        autoescape=select_autoescape(["html", "xml"]),
+    )
+    rendered = env.get_template("complaint_pdf.html").render(
+        tracking_code="SOS-000001-2026",
+        submitted_at="2026-11-13 17:00 UTC",
+        full_name="María Pérez",
+        ci_number="1234567-CH",
+        phone="71234567",
+        address="Calle Bolívar N.º 123",
+        main_type="MALTRATO",
+        subtype_name="Maltrato físico",
+        legal_basis="Art. 350 bis C.P.",
+        incident_date="2026-11-13 14:30",
+        incident_address="Plaza 25 de Mayo",
+        latitude=-19.0478,
+        longitude=-65.2596,
+        description='<img src="file:///etc/passwd">',
+        evidences=[],
+    )
+    assert "-19.0478, -65.2596" in rendered
+    assert '<img src="file:///etc/passwd">' not in rendered
+    assert "&lt;img src=&#34;file:///etc/passwd&#34;&gt;" in rendered
