@@ -1,0 +1,106 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sos_animal_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sos_animal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sos_animal_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sos_animal_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-sos_animal} -d ${POSTGRES_DB:-sos_animal_db}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  storage:
+    image: minio/minio:latest
+    container_name: sos_animal_storage
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin_dev_password}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  storage-init:
+    image: minio/mc:latest
+    container_name: sos_animal_storage_init
+    depends_on:
+      storage:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin_dev_password}
+      MINIO_BUCKET_EVIDENCES: ${MINIO_BUCKET_EVIDENCES:-sos-evidences}
+      MINIO_BUCKET_DOCUMENTS: ${MINIO_BUCKET_DOCUMENTS:-sos-documents}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://storage:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do
+        echo 'Waiting for MinIO...';
+        sleep 2;
+      done;
+      mc mb --ignore-existing local/$${MINIO_BUCKET_EVIDENCES};
+      mc mb --ignore-existing local/$${MINIO_BUCKET_DOCUMENTS};
+      exit 0;
+      "
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: sos_animal_api
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sos_animal}:${POSTGRES_PASSWORD:-sos_animal_dev_password}@db:5432/${POSTGRES_DB:-sos_animal_db}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin_dev_password}
+      MINIO_ENDPOINT: http://storage:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+      MINIO_BUCKET_EVIDENCES: ${MINIO_BUCKET_EVIDENCES:-sos-evidences}
+      MINIO_BUCKET_DOCUMENTS: ${MINIO_BUCKET_DOCUMENTS:-sos-documents}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      SECRET_KEY: ${SECRET_KEY:-change-this-super-secret-jwt-key-in-production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:4321"]}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./apps/api/app:/app/app
+      - ./apps/api/migrations:/app/migrations
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: sos_animal_web
+    restart: unless-stopped
+    environment:
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    ports:
+      - "4321:4321"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  minio_data:
