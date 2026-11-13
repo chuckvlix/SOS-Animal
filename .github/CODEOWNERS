@@ -1,0 +1,37 @@
+# Hybrid CODEOWNERS — SOS Animal
+# Critical architecture, infrastructure, core security, migrations, and shared
+# design foundations require approval from the Tech Lead (@chuckvlix).
+# Feature modules in apps/api/app/modules/* and apps/web/src/{pages,islands,services,types}/*
+# rely on peer cross-review (at least 1 team approval) toward develop.
+
+# Engineering rules, docs, and GitHub governance
+/.github/ @chuckvlix
+/AGENTS.md @chuckvlix
+/CLAUDE.md @chuckvlix
+/docs/ @chuckvlix
+
+# Root monorepo, workspaces, and Docker infrastructure
+/.env.example @chuckvlix
+/docker-compose.yml @chuckvlix
+/package.json @chuckvlix
+/pnpm-lock.yaml @chuckvlix
+/pnpm-workspace.yaml @chuckvlix
+
+# Backend core, dependencies, migrations, and legal PDF templates
+/apps/api/.python-version @chuckvlix
+/apps/api/Dockerfile @chuckvlix
+/apps/api/alembic.ini @chuckvlix
+/apps/api/pyproject.toml @chuckvlix
+/apps/api/uv.lock @chuckvlix
+/apps/api/migrations/ @chuckvlix
+/apps/api/app/main.py @chuckvlix
+/apps/api/app/core/ @chuckvlix
+/apps/api/app/templates/ @chuckvlix
+
+# Frontend configuration, global design tokens, and shared shell layout
+/apps/web/Dockerfile @chuckvlix
+/apps/web/astro.config.mjs @chuckvlix
+/apps/web/package.json @chuckvlix
+/apps/web/tsconfig.json @chuckvlix
+/apps/web/src/styles/ @chuckvlix
+/apps/web/src/layouts/ @chuckvlix

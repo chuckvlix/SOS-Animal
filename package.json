@@ -1,0 +1,12 @@
+{
+  "name": "sos-animal-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @sos-animal/web dev",
+    "build:web": "pnpm --filter @sos-animal/web build",
+    "check:web": "pnpm --filter @sos-animal/web check",
+    "preview:web": "pnpm --filter @sos-animal/web preview"
+  }
+}

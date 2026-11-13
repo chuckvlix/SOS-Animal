@@ -1,0 +1,257 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const {
+  title,
+  description = "Plataforma ciudadana de orientación jurídica, atención veterinaria y denuncia contra el maltrato animal en Sucre, Bolivia.",
+} = Astro.props;
+
+const currentPath = Astro.url.pathname;
+
+interface NavItem {
+  label: string;
+  mobileLabel: string;
+  href: string;
+  isSos?: boolean;
+  iconPath: string;
+}
+
+const navItems: readonly NavItem[] = [
+  {
+    label: "Inicio",
+    mobileLabel: "Inicio",
+    href: "/",
+    iconPath: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1v-9.5Z",
+  },
+  {
+    label: "Denunciar SOS",
+    mobileLabel: "SOS",
+    href: "/denunciar",
+    isSos: true,
+    iconPath: "M12 3 4 6.5V12c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6.5L12 3Zm0 5.5v4m0 3.5h.01",
+  },
+  {
+    label: "Zoonosis y Veterinarias",
+    mobileLabel: "Mapa",
+    href: "/mapa",
+    iconPath: "M12 21s-6-5.2-6-10a6 6 0 1 1 12 0c0 4.8-6 10-6 10Zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z",
+  },
+  {
+    label: "Salud y Vacunas",
+    mobileLabel: "Salud",
+    href: "/campanas",
+    iconPath: "M12 21s-7-4.4-9-8.5C1.5 9.2 3.6 5.5 7 5.5c2 0 3.7 1.1 5 2.7 1.3-1.6 3-2.7 5-2.7 3.4 0 5.5 3.7 4 7-2 4.1-9 8.5-9 8.5Z",
+  },
+  {
+    label: "Normativa Legal",
+    mobileLabel: "Leyes",
+    href: "/normativa",
+    iconPath: "M12 3v18m-7-4h14M6 7h12l-2.5 5h-7L6 7Z",
+  },
+  {
+    label: "Mis Denuncias",
+    mobileLabel: "Casos",
+    href: "/seguimiento",
+    iconPath: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M9 13h6m-6 4h4",
+  },
+];
+
+// Mobile bottom bar displays the 5 primary destinations with SOS elevated in the center.
+const mobileNavOrder: readonly string[] = ["/", "/mapa", "/denunciar", "/campanas", "/normativa"];
+const mobileNavItems: readonly NavItem[] = mobileNavOrder
+  .map((href) => navItems.find((item) => item.href === href))
+  .filter((item): item is NavItem => item !== undefined);
+
+function isActiveRoute(href: string): boolean {
+  if (href === "/") {
+    return currentPath === "/";
+  }
+  return currentPath === href || currentPath.startsWith(`${href}/`);
+}
+---
+
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>{title} | SOS Animal</title>
+  </head>
+  <body class="bg-bg-canvas text-text-primary antialiased">
+    <a href="#main-content" class="skip-link visually-hidden">
+      Saltar al contenido principal
+    </a>
+
+    <!-- Mobile Top Header (< 1024px) -->
+    <header
+      class="mobile-header-safe fixed inset-x-0 top-0 z-30 flex min-h-14 items-center justify-between border-b border-border bg-bg-surface lg:hidden"
+    >
+      <a href="/" class="flex items-center gap-2.5 no-underline">
+        <svg class="h-7 w-7 shrink-0" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <path
+            d="M16 28.2C16 28.2 4.5 20.8 4.5 11.7C4.5 7.9 7.5 5 11.2 5C13.4 5 15.1 6.1 16 7.5C16.9 6.1 18.6 5 20.8 5C24.5 5 27.5 7.9 27.5 11.7C27.5 20.8 16 28.2 16 28.2Z"
+            fill="#5B21B6"
+          />
+          <circle cx="12.2" cy="12.4" r="1.5" fill="#FFFFFF" />
+          <circle cx="16" cy="10.8" r="1.5" fill="#FFFFFF" />
+          <circle cx="19.8" cy="12.4" r="1.5" fill="#FFFFFF" />
+          <path
+            d="M16 14.3C14 14.3 12.6 15.8 12.6 17.5C12.6 18.9 13.8 19.8 16 19.8C18.2 19.8 19.4 18.9 19.4 17.5C19.4 15.8 18 14.3 16 14.3Z"
+            fill="#FFFFFF"
+          />
+        </svg>
+        <span class="font-display text-lg font-bold text-text-primary">SOS Animal</span>
+      </a>
+
+      <span class="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-medium text-primary">
+        Sucre, Bolivia
+      </span>
+    </header>
+
+    <!-- Desktop Fixed Sidebar (>= 1024px) -->
+    <aside
+      class="fixed inset-y-0 start-0 z-30 hidden w-[260px] flex-col justify-between border-e border-border bg-bg-surface p-5 lg:flex"
+    >
+      <div>
+        <a href="/" class="mb-6 flex items-center gap-3 no-underline">
+          <svg class="h-8 w-8 shrink-0" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path
+              d="M16 28.2C16 28.2 4.5 20.8 4.5 11.7C4.5 7.9 7.5 5 11.2 5C13.4 5 15.1 6.1 16 7.5C16.9 6.1 18.6 5 20.8 5C24.5 5 27.5 7.9 27.5 11.7C27.5 20.8 16 28.2 16 28.2Z"
+              fill="#5B21B6"
+            />
+            <circle cx="12.2" cy="12.4" r="1.5" fill="#FFFFFF" />
+            <circle cx="16" cy="10.8" r="1.5" fill="#FFFFFF" />
+            <circle cx="19.8" cy="12.4" r="1.5" fill="#FFFFFF" />
+            <path
+              d="M16 14.3C14 14.3 12.6 15.8 12.6 17.5C12.6 18.9 13.8 19.8 16 19.8C18.2 19.8 19.4 18.9 19.4 17.5C19.4 15.8 18 14.3 16 14.3Z"
+              fill="#FFFFFF"
+            />
+          </svg>
+          <div>
+            <span class="block font-display text-lg font-bold leading-tight text-text-primary">
+              SOS Animal
+            </span>
+            <span class="block text-xs text-text-secondary">Protección LegalTech</span>
+          </div>
+        </a>
+
+        <nav aria-label="Principal">
+          <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
+            {
+              navItems.map((item) => {
+                const active = isActiveRoute(item.href);
+                return (
+                  <li>
+                    <a
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      class:list={[
+                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium no-underline transition-colors",
+                        item.isSos
+                          ? active
+                            ? "border-s-4 border-sos bg-sos text-white font-semibold"
+                            : "bg-sos-soft text-sos-text hover:bg-sos hover:text-white font-semibold"
+                          : active
+                            ? "border-s-4 border-primary bg-primary-soft text-primary font-semibold"
+                            : "text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
+                      ]}
+                    >
+                      <svg
+                        class="h-5 w-5 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.75"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d={item.iconPath} />
+                      </svg>
+                      <span>{item.label}</span>
+                    </a>
+                  </li>
+                );
+              })
+            }
+          </ul>
+        </nav>
+      </div>
+
+      <div class="border-t border-border pt-4">
+        <p class="m-0 text-xs font-medium text-text-secondary">Jurisdicción activa</p>
+        <p class="mt-1 inline-flex items-center rounded-full bg-primary-soft px-3 py-1 text-xs font-semibold text-primary">
+          Sucre, Bolivia
+        </p>
+      </div>
+    </aside>
+
+    <!-- Main Page Content -->
+    <main
+      id="main-content"
+      tabindex="-1"
+      class="min-h-dvh pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-24 lg:ps-[260px] lg:pt-0 lg:pb-8"
+    >
+      <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+        <slot />
+      </div>
+    </main>
+
+    <!-- Mobile Fixed Bottom Navigation Bar (< 1024px) -->
+    <nav
+      aria-label="Acceso rápido móvil"
+      class="mobile-bottom-safe fixed inset-x-0 bottom-0 z-30 border-t border-border bg-bg-surface pt-1 lg:hidden"
+    >
+      <ul class="m-0 grid list-none grid-cols-5 items-end gap-1 p-0">
+        {
+          mobileNavItems.map((item) => {
+            const active = isActiveRoute(item.href);
+            return (
+              <li class="flex justify-center">
+                <a
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  class:list={[
+                    "flex min-h-[48px] min-w-[48px] flex-col items-center justify-center rounded-lg px-2 py-1 text-xs font-medium no-underline",
+                    item.isSos
+                      ? "-mt-3 rounded-xl bg-sos px-3 py-2 text-white shadow-sm font-semibold"
+                      : active
+                        ? "bg-primary-soft text-primary font-semibold"
+                        : "text-text-secondary",
+                  ]}
+                >
+                  <svg
+                    class="h-5 w-5 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d={item.iconPath} />
+                  </svg>
+                  <span class="mt-0.5 leading-none">{item.mobileLabel}</span>
+                </a>
+              </li>
+            );
+          })
+        }
+      </ul>
+    </nav>
+  </body>
+</html>

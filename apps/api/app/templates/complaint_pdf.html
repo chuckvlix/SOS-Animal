@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Documento de Denuncia — {{ tracking_code }}</title>
+    <style>
+      @page {
+        size: letter;
+        margin: 2cm 2cm 2.2cm 2cm;
+      }
+
+      body {
+        font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+        color: #0f172a;
+        font-size: 11pt;
+        line-height: 1.5;
+        margin: 0;
+      }
+
+      .header {
+        border-bottom: 2px solid #5b21b6;
+        padding-bottom: 12px;
+        margin-bottom: 20px;
+      }
+
+      .brand {
+        font-size: 10pt;
+        font-weight: 700;
+        color: #5b21b6;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      h1 {
+        font-size: 18pt;
+        margin: 6px 0 4px 0;
+        color: #0f172a;
+      }
+
+      .meta-row {
+        font-size: 10pt;
+        color: #475569;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .section {
+        margin-bottom: 16px;
+      }
+
+      .section-title {
+        font-size: 11pt;
+        font-weight: 700;
+        color: #5b21b6;
+        border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 4px;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+      }
+
+      .legal-box {
+        background-color: #f3e8ff;
+        border-left: 4px solid #5b21b6;
+        padding: 10px 12px;
+        font-size: 10pt;
+      }
+
+      .field-grid {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .field-grid td {
+        padding: 4px 8px 4px 0;
+        vertical-align: top;
+      }
+
+      .label {
+        font-weight: 600;
+        color: #475569;
+        width: 180px;
+      }
+
+      .footer {
+        margin-top: 28px;
+        padding-top: 10px;
+        border-top: 1px solid #e2e8f0;
+        font-size: 9pt;
+        color: #475569;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <div class="brand">SOS Animal — Sucre, Bolivia</div>
+      <h1>DOCUMENTO DE DENUNCIA</h1>
+      <div class="meta-row">
+        Código de seguimiento: <strong>{{ tracking_code }}</strong> · Fecha de emisión: {{ submitted_at }}
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-title">I. Autoridades Destinatarias</div>
+      <p>
+        Señores: Ministerio Público (Fiscalía de Materia), Policía Boliviana — POFOMA,
+        Centro Municipal de Zoonosis de Sucre (CEMZOO) y Gobierno Autónomo Municipal de Sucre.
+      </p>
+    </section>
+
+    <section class="section">
+      <div class="section-title">II. Datos de la Persona Denunciante</div>
+      <table class="field-grid">
+        <tr>
+          <td class="label">Nombre completo:</td>
+          <td>{{ full_name }}</td>
+        </tr>
+        <tr>
+          <td class="label">Cédula de Identidad:</td>
+          <td>{{ ci_number }}</td>
+        </tr>
+        <tr>
+          <td class="label">Teléfono de contacto:</td>
+          <td>{{ phone }}</td>
+        </tr>
+        <tr>
+          <td class="label">Domicilio real:</td>
+          <td>{{ address }}</td>
+        </tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <div class="section-title">III. Tipificación y Fundamento Legal</div>
+      <table class="field-grid">
+        <tr>
+          <td class="label">Tipo de hecho:</td>
+          <td>{{ main_type }} — {{ subtype_name }}</td>
+        </tr>
+      </table>
+      <div class="legal-box">{{ legal_basis }}</div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">IV. Relato Circunstanciado del Hecho</div>
+      <table class="field-grid">
+        <tr>
+          <td class="label">Fecha y hora del hecho:</td>
+          <td>{{ incident_date }}</td>
+        </tr>
+        <tr>
+          <td class="label">Ubicación del hecho:</td>
+          <td>{{ incident_address }}</td>
+        </tr>
+        {% if latitude is not none and longitude is not none %}
+        <tr>
+          <td class="label">Coordenadas GPS:</td>
+          <td>{{ latitude }}, {{ longitude }}</td>
+        </tr>
+        {% endif %}
+      </table>
+      <p>{{ description }}</p>
+    </section>
+
+    <section class="section">
+      <div class="section-title">V. Evidencias Adjuntas</div>
+      <ul>
+        {% for evidence in evidences %}
+        <li>{{ evidence.evidence_type }} — {{ evidence.object_key }} ({{ evidence.mime_type }})</li>
+        {% else %}
+        <li>Sin evidencias digitales adjuntas al momento del registro.</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <footer class="footer">
+      Documento de Denuncia generado automáticamente por la plataforma ciudadana SOS Animal (Sucre, Bolivia).
+      No constituye patrocinio de abogado ni sustituye la recepción formal de la autoridad competente.
+    </footer>
+  </body>
+</html>
