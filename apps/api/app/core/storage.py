@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated, Literal, Protocol
@@ -6,6 +7,7 @@ from uuid import uuid4
 import boto3
 from botocore.client import BaseClient
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
@@ -43,6 +45,15 @@ class PresignedUploadResult:
     expires_in_seconds: int
 
 
+@dataclass(frozen=True, slots=True)
+class PresignedDownloadResult:
+    """Result payload returned after generating a presigned GET download URL."""
+
+    download_url: str
+    object_key: str
+    expires_in_seconds: int
+
+
 class S3ClientProtocol(Protocol):
     """Structural protocol for S3-compatible presigned URL clients."""
 
@@ -52,6 +63,33 @@ class S3ClientProtocol(Protocol):
         Params: dict[str, object],
         ExpiresIn: int,
     ) -> str: ...
+
+
+class S3DocumentClientProtocol(S3ClientProtocol, Protocol):
+    """Structural protocol for S3 clients supporting direct uploads, inspection, and deletion."""
+
+    def put_object(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+        Body: bytes,
+        ContentType: str,
+    ) -> object: ...
+
+    def head_object(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+    ) -> Mapping[str, object]: ...
+
+    def delete_object(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+    ) -> object: ...
 
 
 def validate_upload_metadata(
@@ -210,6 +248,164 @@ class PresignedUploadResponse(BaseModel):
 def get_s3_client() -> S3ClientProtocol:
     """FastAPI dependency providing an S3 client bound to the public MinIO endpoint."""
     return create_s3_client(get_settings().MINIO_PUBLIC_ENDPOINT)
+
+
+def get_internal_s3_client() -> S3DocumentClientProtocol:
+    """FastAPI dependency providing an S3 client bound to the internal MinIO endpoint."""
+    return create_s3_client(get_settings().MINIO_ENDPOINT)
+
+
+def upload_document_bytes(
+    *,
+    data: bytes,
+    object_key: str,
+    mime_type: str = "application/pdf",
+    bucket: str | None = None,
+    client: S3DocumentClientProtocol | None = None,
+) -> str:
+    """Upload server-generated document bytes to MinIO and return the sanitized object key."""
+    if not data:
+        raise UploadValidationError("Document content must not be empty.", status_code=400)
+    current_settings = get_settings()
+    target_bucket = (current_settings.MINIO_BUCKET_DOCUMENTS if bucket is None else bucket).strip()
+    if not target_bucket:
+        raise UploadValidationError("Target document bucket must not be empty.", status_code=400)
+    clean_key = _sanitize_object_prefix(object_key)
+    s3_client = client or create_s3_client(current_settings.MINIO_ENDPOINT)
+    try:
+        s3_client.put_object(
+            Bucket=target_bucket,
+            Key=clean_key,
+            Body=data,
+            ContentType=mime_type.strip().lower(),
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise UploadValidationError(
+            "Failed to store generated PDF document in object storage.",
+            status_code=502,
+        ) from exc
+    return clean_key
+
+
+def generate_presigned_download(
+    *,
+    object_key: str,
+    bucket: str | None = None,
+    client: S3ClientProtocol | None = None,
+) -> PresignedDownloadResult:
+    """Generate a 180-second presigned GET URL for downloading an existing document."""
+    current_settings = get_settings()
+    target_bucket = (current_settings.MINIO_BUCKET_DOCUMENTS if bucket is None else bucket).strip()
+    if not target_bucket:
+        raise UploadValidationError("Target document bucket must not be empty.", status_code=400)
+    clean_key = _sanitize_object_prefix(object_key)
+    s3_client = client or create_s3_client(current_settings.MINIO_PUBLIC_ENDPOINT)
+    download_url = s3_client.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": target_bucket, "Key": clean_key},
+        ExpiresIn=PRESIGNED_UPLOAD_EXPIRY_SECONDS,
+    )
+    return PresignedDownloadResult(
+        download_url=download_url,
+        object_key=clean_key,
+        expires_in_seconds=PRESIGNED_UPLOAD_EXPIRY_SECONDS,
+    )
+
+
+def _is_s3_not_found_error(exc: ClientError) -> bool:
+    error_code = str(exc.response.get("Error", {}).get("Code", ""))
+    status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return error_code in {"404", "NoSuchKey", "NotFound"} or status_code == 404
+
+
+def verify_evidence_object(
+    *,
+    object_key: str,
+    expected_mime_type: str,
+    expected_size_bytes: int,
+    bucket: str | None = None,
+    client: S3DocumentClientProtocol | None = None,
+) -> str:
+    """Confirm an evidence object exists in MinIO and matches declared MIME and byte size."""
+    current_settings = get_settings()
+    target_bucket = (current_settings.MINIO_BUCKET_EVIDENCES if bucket is None else bucket).strip()
+    if not target_bucket:
+        raise UploadValidationError("Target storage bucket must not be empty.", status_code=400)
+    clean_key = _sanitize_object_prefix(object_key)
+    s3_client = client or create_s3_client(current_settings.MINIO_ENDPOINT)
+    try:
+        metadata = s3_client.head_object(Bucket=target_bucket, Key=clean_key)
+    except ClientError as exc:
+        if _is_s3_not_found_error(exc):
+            raise UploadValidationError(
+                "Uploaded evidence object was not found in storage.",
+                status_code=422,
+            ) from exc
+        raise UploadValidationError(
+            "Failed to verify evidence object in object storage.",
+            status_code=502,
+        ) from exc
+    except BotoCoreError as exc:
+        raise UploadValidationError(
+            "Failed to verify evidence object in object storage.",
+            status_code=502,
+        ) from exc
+
+    raw_size = metadata.get("ContentLength")
+    if isinstance(raw_size, bool) or not isinstance(raw_size, int) or raw_size <= 0:
+        raise UploadValidationError(
+            "Stored evidence object has an invalid byte size.",
+            status_code=422,
+        )
+    max_bytes = current_settings.MAX_UPLOAD_SIZE_BYTES
+    if raw_size > max_bytes:
+        raise UploadValidationError(
+            f"File size exceeds maximum allowed limit of {max_bytes} bytes.",
+            status_code=413,
+        )
+    if raw_size != expected_size_bytes:
+        raise UploadValidationError(
+            "Declared file_size_bytes does not match the uploaded object in storage.",
+            status_code=422,
+        )
+
+    raw_mime = metadata.get("ContentType")
+    if isinstance(raw_mime, str) and raw_mime.strip():
+        actual_mime = raw_mime.split(";", 1)[0].strip().lower()
+        if actual_mime != expected_mime_type.strip().lower():
+            raise UploadValidationError(
+                "Declared mime_type does not match the uploaded object in storage.",
+                status_code=422,
+            )
+    return clean_key
+
+
+def delete_storage_object(
+    *,
+    object_key: str,
+    bucket: str,
+    client: S3DocumentClientProtocol | None = None,
+) -> None:
+    """Delete an object from MinIO by key (idempotent on missing objects)."""
+    clean_bucket = bucket.strip()
+    if not clean_bucket:
+        raise UploadValidationError("Target storage bucket must not be empty.", status_code=400)
+    clean_key = _sanitize_object_prefix(object_key)
+    s3_client = client or create_s3_client(get_settings().MINIO_ENDPOINT)
+    try:
+        s3_client.delete_object(Bucket=clean_bucket, Key=clean_key)
+    except ClientError as exc:
+        if _is_s3_not_found_error(exc):
+            return
+        raise UploadValidationError(
+            "Failed to remove object from storage.",
+            status_code=502,
+        ) from exc
+    except BotoCoreError as exc:
+        raise UploadValidationError(
+            "Failed to remove object from storage.",
+            status_code=502,
+        ) from exc
 
 
 def _resolve_upload_target(
