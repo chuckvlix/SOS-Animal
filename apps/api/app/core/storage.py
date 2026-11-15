@@ -6,6 +6,7 @@ from uuid import uuid4
 import boto3
 from botocore.client import BaseClient
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
@@ -43,6 +44,15 @@ class PresignedUploadResult:
     expires_in_seconds: int
 
 
+@dataclass(frozen=True, slots=True)
+class PresignedDownloadResult:
+    """Result payload returned after generating a presigned GET download URL."""
+
+    download_url: str
+    object_key: str
+    expires_in_seconds: int
+
+
 class S3ClientProtocol(Protocol):
     """Structural protocol for S3-compatible presigned URL clients."""
 
@@ -52,6 +62,19 @@ class S3ClientProtocol(Protocol):
         Params: dict[str, object],
         ExpiresIn: int,
     ) -> str: ...
+
+
+class S3DocumentClientProtocol(S3ClientProtocol, Protocol):
+    """Structural protocol for S3 clients supporting direct object uploads."""
+
+    def put_object(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+        Body: bytes,
+        ContentType: str,
+    ) -> object: ...
 
 
 def validate_upload_metadata(
@@ -210,6 +233,68 @@ class PresignedUploadResponse(BaseModel):
 def get_s3_client() -> S3ClientProtocol:
     """FastAPI dependency providing an S3 client bound to the public MinIO endpoint."""
     return create_s3_client(get_settings().MINIO_PUBLIC_ENDPOINT)
+
+
+def get_internal_s3_client() -> S3DocumentClientProtocol:
+    """FastAPI dependency providing an S3 client bound to the internal MinIO endpoint."""
+    return create_s3_client(get_settings().MINIO_ENDPOINT)
+
+
+def upload_document_bytes(
+    *,
+    data: bytes,
+    object_key: str,
+    mime_type: str = "application/pdf",
+    bucket: str | None = None,
+    client: S3DocumentClientProtocol | None = None,
+) -> str:
+    """Upload server-generated document bytes to MinIO and return the sanitized object key."""
+    if not data:
+        raise UploadValidationError("Document content must not be empty.", status_code=400)
+    current_settings = get_settings()
+    target_bucket = (current_settings.MINIO_BUCKET_DOCUMENTS if bucket is None else bucket).strip()
+    if not target_bucket:
+        raise UploadValidationError("Target document bucket must not be empty.", status_code=400)
+    clean_key = _sanitize_object_prefix(object_key)
+    s3_client = client or create_s3_client(current_settings.MINIO_ENDPOINT)
+    try:
+        s3_client.put_object(
+            Bucket=target_bucket,
+            Key=clean_key,
+            Body=data,
+            ContentType=mime_type.strip().lower(),
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise UploadValidationError(
+            "Failed to store generated PDF document in object storage.",
+            status_code=502,
+        ) from exc
+    return clean_key
+
+
+def generate_presigned_download(
+    *,
+    object_key: str,
+    bucket: str | None = None,
+    client: S3ClientProtocol | None = None,
+) -> PresignedDownloadResult:
+    """Generate a 180-second presigned GET URL for downloading an existing document."""
+    current_settings = get_settings()
+    target_bucket = (current_settings.MINIO_BUCKET_DOCUMENTS if bucket is None else bucket).strip()
+    if not target_bucket:
+        raise UploadValidationError("Target document bucket must not be empty.", status_code=400)
+    clean_key = _sanitize_object_prefix(object_key)
+    s3_client = client or create_s3_client(current_settings.MINIO_PUBLIC_ENDPOINT)
+    download_url = s3_client.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": target_bucket, "Key": clean_key},
+        ExpiresIn=PRESIGNED_UPLOAD_EXPIRY_SECONDS,
+    )
+    return PresignedDownloadResult(
+        download_url=download_url,
+        object_key=clean_key,
+        expires_in_seconds=PRESIGNED_UPLOAD_EXPIRY_SECONDS,
+    )
 
 
 def _resolve_upload_target(
