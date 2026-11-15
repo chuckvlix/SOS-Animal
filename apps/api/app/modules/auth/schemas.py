@@ -1,6 +1,8 @@
 """Pydantic v2 request/response schemas for authentication and progressive user profile."""
 
+import contextlib
 import re
+import unicodedata
 import uuid
 from datetime import datetime
 from typing import Literal, Self
@@ -9,15 +11,42 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 from app.modules.auth.models import UserRole
 
-CI_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-\s]{2,29}$")
-PHONE_PATTERN = re.compile(r"^\+?[0-9][0-9\-\s]{5,29}$")
+MAX_PASSWORD_LENGTH = 128
+CI_PATTERN = re.compile(r"^[A-Za-z0-9]+(?:[ -][A-Za-z0-9]+)*$")
+PHONE_PATTERN = re.compile(r"^\+?[0-9]+(?:[ -][0-9]+)*$")
+_DISALLOWED_UNICODE_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+def _strip_if_str(value: object) -> object:
+    """Trim leading/trailing whitespace before Pydantic checks string length bounds."""
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def has_disallowed_control_chars(value: str, *, allow_format_chars: bool = False) -> bool:
+    """Detect ASCII/C1 control, line/paragraph separator, and optional invisible format chars."""
+    blocked = {"Cc", "Zl", "Zp"} if allow_format_chars else _DISALLOWED_UNICODE_CATEGORIES
+    return any(unicodedata.category(ch) in blocked for ch in value)
+
+
+def normalize_email_identifier(email: str) -> str:
+    """Normalize email casing and convert punycode IDNA labels to lowercase Unicode."""
+    cleaned = email.strip().lower()
+    if "@" not in cleaned:
+        return cleaned
+    local_part, domain = cleaned.rsplit("@", 1)
+    if "xn--" in domain:
+        with contextlib.suppress(UnicodeError):
+            domain = domain.encode("ascii").decode("idna").lower()
+    return f"{local_part}@{domain}"
 
 
 def _clean_safe_text(value: str, field_name: str, min_len: int, max_len: int) -> str:
-    """Strip surrounding whitespace, reject HTML angle brackets/control chars, and check bounds."""
+    """Strip surrounding whitespace, reject control/invisible/HTML chars, and check bounds."""
     cleaned = value.strip()
-    if any(ord(ch) < 32 for ch in cleaned):
-        raise ValueError(f"{field_name} must not contain control characters.")
+    if has_disallowed_control_chars(cleaned):
+        raise ValueError(f"{field_name} contains disallowed control or invisible characters.")
     if len(cleaned) < min_len or len(cleaned) > max_len:
         raise ValueError(f"{field_name} must be between {min_len} and {max_len} characters.")
     if "<" in cleaned or ">" in cleaned:
@@ -32,7 +61,13 @@ class UserRegisterRequest(BaseModel):
 
     full_name: str = Field(min_length=2, max_length=150)
     email: EmailStr = Field(max_length=255)
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=8, max_length=MAX_PASSWORD_LENGTH)
+
+    @field_validator("full_name", "email", mode="before")
+    @classmethod
+    def strip_text_fields(cls, value: object) -> object:
+        """Trim surrounding whitespace before applying length and email checks."""
+        return _strip_if_str(value)
 
     @field_validator("full_name")
     @classmethod
@@ -44,14 +79,21 @@ class UserRegisterRequest(BaseModel):
     @classmethod
     def normalize_email(cls, value: EmailStr) -> str:
         """Normalize email to lowercase so uniqueness and login remain case-insensitive."""
-        return str(value).strip().lower()
+        return normalize_email_identifier(str(value))
 
     @field_validator("password")
     @classmethod
     def validate_password_not_blank(cls, value: str) -> str:
-        """Reject whitespace-only passwords while preserving user-chosen spaces."""
-        if value.isspace():
-            raise ValueError("password must not consist only of whitespace.")
+        """Reject whitespace-only or control-character passwords while preserving valid spaces."""
+        if has_disallowed_control_chars(value, allow_format_chars=True):
+            raise ValueError("password must not contain control characters.")
+        visible_chars = [
+            ch for ch in value if not ch.isspace() and unicodedata.category(ch) != "Cf"
+        ]
+        if not visible_chars:
+            raise ValueError(
+                "password must not consist only of whitespace or invisible characters."
+            )
         return value
 
 
@@ -68,9 +110,15 @@ class UserProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     full_name: str | None = Field(default=None, min_length=2, max_length=150)
-    ci_number: str | None = Field(default=None, min_length=3, max_length=30)
+    ci_number: str | None = Field(default=None, min_length=4, max_length=30)
     phone: str | None = Field(default=None, min_length=6, max_length=30)
     address: str | None = Field(default=None, min_length=5, max_length=255)
+
+    @field_validator("full_name", "ci_number", "phone", "address", mode="before")
+    @classmethod
+    def strip_optional_text_fields(cls, value: object) -> object:
+        """Trim surrounding whitespace before Pydantic enforces field length bounds."""
+        return _strip_if_str(value)
 
     @field_validator("full_name")
     @classmethod
@@ -86,20 +134,20 @@ class UserProfileUpdate(BaseModel):
         """Validate Bolivian identity card format without special HTML characters."""
         if value is None:
             return None
-        cleaned = _clean_safe_text(value, "ci_number", 3, 30)
-        if not CI_PATTERN.fullmatch(cleaned):
-            raise ValueError("ci_number contains invalid characters.")
+        cleaned = _clean_safe_text(value, "ci_number", 4, 30)
+        if not CI_PATTERN.fullmatch(cleaned) or sum(ch.isdigit() for ch in cleaned) < 4:
+            raise ValueError("ci_number must be a valid identity document number.")
         return cleaned
 
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, value: str | None) -> str | None:
-        """Validate phone number digits, spaces, hyphens, and optional leading plus."""
+        """Validate phone number digits, single spaces/hyphens, and optional leading plus."""
         if value is None:
             return None
         cleaned = _clean_safe_text(value, "phone", 6, 30)
-        if not PHONE_PATTERN.fullmatch(cleaned):
-            raise ValueError("phone contains invalid characters.")
+        if not PHONE_PATTERN.fullmatch(cleaned) or sum(ch.isdigit() for ch in cleaned) < 6:
+            raise ValueError("phone must contain at least 6 digits and valid separators.")
         return cleaned
 
     @field_validator("address")

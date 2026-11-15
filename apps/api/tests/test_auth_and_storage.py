@@ -3,6 +3,8 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
@@ -10,8 +12,15 @@ from sqlmodel.pool import StaticPool
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.security import create_access_token, hash_password
-from app.core.storage import PRESIGNED_UPLOAD_EXPIRY_SECONDS, get_s3_client
+from app.core.storage import (
+    PRESIGNED_UPLOAD_EXPIRY_SECONDS,
+    UploadValidationError,
+    create_s3_client,
+    generate_presigned_upload,
+    get_s3_client,
+)
 from app.main import app
+from app.modules.auth import service as auth_service
 from app.modules.auth.models import User, UserRole
 
 
@@ -401,3 +410,203 @@ def test_presigned_upload_enforces_auth_mime_size_and_bucket_rbac(
     assert norm_body["object_key"].startswith("norms/")
     assert norm_body["object_key"].endswith(".pdf")
     assert stub_s3.calls[-1]["Params"]["Bucket"] == "sos-documents"
+
+
+def test_login_sanitizes_nul_bytes_oversized_passwords_and_idna_domains(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    """Login blocks PostgreSQL NUL-byte crashes, huge passwords, and supports IDNA aliases."""
+
+    @sa.event.listens_for(db_session.bind, "before_cursor_execute")
+    def reject_postgres_nul_bytes(
+        _conn: object,
+        _cursor: object,
+        _statement: str,
+        parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        values = parameters.values() if isinstance(parameters, dict) else parameters
+        if any(isinstance(val, str) and "\x00" in val for val in values):
+            raise AssertionError("NUL byte reached SQL query execution")
+
+    reg = api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "Usuario IDNA",
+            "email": "usuario@MÜNCHEN.de",
+            "password": "Password123!",
+        },
+    )
+    assert reg.status_code == 201
+    assert reg.json()["email"] == "usuario@münchen.de"
+
+    punycode_login = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "usuario@xn--mnchen-3ya.de", "password": "Password123!"},
+    )
+    assert punycode_login.status_code == 200
+
+    nul_login = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "evil\x00@example.com", "password": "Password123!"},
+    )
+    assert nul_login.status_code == 401
+
+    oversized_pw = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "usuario@münchen.de", "password": "A" * 500},
+    )
+    assert oversized_pw.status_code == 401
+
+
+def test_schemas_reject_invisible_control_chars_and_garbage_ci_phone(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    """Auth schemas reject invisible/control Unicode, garbage CI/phone, and trim before bounds."""
+    for bad_name in ("\u200b\u200b", "Ana\x7fPerez", "Ana\x85Perez", "Ana\u202ePerez"):
+        res = api_client.post(
+            "/api/v1/auth/register",
+            json={
+                "full_name": bad_name,
+                "email": "safe-check@example.com",
+                "password": "Password123!",
+            },
+        )
+        assert res.status_code == 422
+
+    for bad_pw in ("\x00" * 8, "\u200b" * 8, "Pass\nword123"):
+        res = api_client.post(
+            "/api/v1/auth/register",
+            json={
+                "full_name": "Nombre Válido",
+                "email": "pw-check@example.com",
+                "password": bad_pw,
+            },
+        )
+        assert res.status_code == 422
+
+    citizen = _create_user(db_session, email="profile-edge@example.com")
+    headers = _auth_header(citizen)
+
+    padded_max_name = api_client.patch(
+        "/api/v1/auth/me/profile",
+        headers=headers,
+        json={"full_name": f"  {'a' * 150}  "},
+    )
+    assert padded_max_name.status_code == 200
+    assert len(padded_max_name.json()["full_name"]) == 150
+
+    for bad_ci in ("1--", "1     2", "1\u20282", "ABCD", "12-"):
+        res = api_client.patch(
+            "/api/v1/auth/me/profile",
+            headers=headers,
+            json={"ci_number": bad_ci},
+        )
+        assert res.status_code == 422
+
+    for bad_phone in ("7-----1", "+1-----", "7     1", "7\u202812345", "12345+"):
+        res = api_client.patch(
+            "/api/v1/auth/me/profile",
+            headers=headers,
+            json={"phone": bad_phone},
+        )
+        assert res.status_code == 422
+
+    for valid_ci in ("7482910-1A", "1234567-CH", "E-123456", "12345"):
+        res = api_client.patch(
+            "/api/v1/auth/me/profile",
+            headers=headers,
+            json={"ci_number": valid_ci},
+        )
+        assert res.status_code == 200
+
+    valid_phone = api_client.patch(
+        "/api/v1/auth/me/profile",
+        headers=headers,
+        json={"phone": "4-6451234"},
+    )
+    assert valid_phone.status_code == 200
+
+
+def test_last_active_admin_cannot_be_demoted(db_session: Session) -> None:
+    """Service refuses to demote the sole remaining active administrator."""
+    sole_admin = _create_user(db_session, email="sole-admin@example.com", role=UserRole.ADMIN)
+    stale_actor = User(
+        id=uuid4(),
+        full_name="Actor Remoto",
+        email="stale-actor@example.com",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.ADMIN,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        auth_service.update_user_role(
+            session=db_session,
+            actor=stale_actor,
+            target_user_id=sole_admin.id,
+            new_role=UserRole.CIUDADANO,
+        )
+    assert exc.value.status_code == 400
+
+
+def test_storage_hardening_empty_bucket_trimming_and_real_sigv4_headers(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Storage rejects empty buckets, trims MIME before bounds, caches S3 client, and signs PUT."""
+    with pytest.raises(UploadValidationError) as empty_bucket_exc:
+        generate_presigned_upload(
+            mime_type="image/jpeg",
+            file_size_bytes=512,
+            bucket="",
+        )
+    assert empty_bucket_exc.value.status_code == 400
+
+    manager = _create_user(db_session, email="norm-cfg@example.com", role=UserRole.GESTOR_CEMZOO)
+    with monkeypatch.context() as mp:
+        mp.setenv("MINIO_BUCKET_DOCUMENTS", "")
+        get_settings.cache_clear()
+        misconfigured = api_client.post(
+            "/api/v1/storage/presigned-upload",
+            headers=_auth_header(manager),
+            json={
+                "mime_type": "application/pdf",
+                "file_size_bytes": 1024,
+                "purpose": "norm",
+            },
+        )
+        assert misconfigured.status_code == 500
+    get_settings.cache_clear()
+
+    padded_mime = api_client.post(
+        "/api/v1/storage/presigned-upload",
+        headers=_auth_header(manager),
+        json={
+            "mime_type": f"  image/jpeg{' ' * 95}",
+            "file_size_bytes": 2048,
+        },
+    )
+    assert padded_mime.status_code == 200
+
+    blank_mime = api_client.post(
+        "/api/v1/storage/presigned-upload",
+        headers=_auth_header(manager),
+        json={"mime_type": "   ", "file_size_bytes": 2048},
+    )
+    assert blank_mime.status_code == 422
+
+    client_a = create_s3_client("http://localhost:9000")
+    client_b = create_s3_client(" http://localhost:9000 ")
+    assert client_a is client_b
+
+    real_res = generate_presigned_upload(
+        mime_type=" IMAGE/JPEG ",
+        file_size_bytes=2048,
+        client=client_a,
+    )
+    assert "X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost" in real_res.upload_url
+    assert "X-Amz-Expires=180" in real_res.upload_url

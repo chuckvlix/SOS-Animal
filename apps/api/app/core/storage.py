@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Annotated, Literal, Protocol
 from uuid import uuid4
 
@@ -106,21 +107,38 @@ def build_object_key(prefix: str, mime_type: str) -> str:
     return f"{clean_prefix}/{uuid4()}{extension}"
 
 
-def create_s3_client(endpoint_url: str) -> BaseClient:
-    """Create a boto3 S3 client configured with SigV4 for MinIO compatibility."""
-    current_settings = get_settings()
-    lowered = endpoint_url.strip().lower()
-    use_ssl = lowered.startswith("https://") or (
-        not lowered.startswith("http://") and current_settings.MINIO_USE_SSL
-    )
+@lru_cache(maxsize=8)
+def _cached_s3_client(
+    endpoint_url: str,
+    access_key: str,
+    secret_key: str,
+    use_ssl: bool,
+) -> BaseClient:
+    """Reuse configured SigV4 boto3 S3 clients across requests for identical settings."""
     return boto3.client(
         "s3",
         endpoint_url=endpoint_url,
-        aws_access_key_id=current_settings.MINIO_ROOT_USER,
-        aws_secret_access_key=current_settings.MINIO_ROOT_PASSWORD,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
         region_name="us-east-1",
         use_ssl=use_ssl,
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+
+
+def create_s3_client(endpoint_url: str) -> BaseClient:
+    """Create or reuse a boto3 S3 client configured with SigV4 for MinIO compatibility."""
+    current_settings = get_settings()
+    clean_endpoint = endpoint_url.strip()
+    lowered = clean_endpoint.lower()
+    use_ssl = lowered.startswith("https://") or (
+        not lowered.startswith("http://") and current_settings.MINIO_USE_SSL
+    )
+    return _cached_s3_client(
+        clean_endpoint,
+        current_settings.MINIO_ROOT_USER,
+        current_settings.MINIO_ROOT_PASSWORD,
+        use_ssl,
     )
 
 
@@ -134,7 +152,9 @@ def generate_presigned_upload(
 ) -> PresignedUploadResult:
     """Validate file metadata and generate a 180-second presigned PUT URL."""
     current_settings = get_settings()
-    target_bucket = bucket or current_settings.MINIO_BUCKET_EVIDENCES
+    target_bucket = current_settings.MINIO_BUCKET_EVIDENCES if bucket is None else bucket.strip()
+    if not target_bucket:
+        raise UploadValidationError("Target storage bucket must not be empty.", status_code=400)
     validate_upload_metadata(mime_type=mime_type, file_size_bytes=file_size_bytes)
     normalized_mime = mime_type.strip().lower()
     object_key = build_object_key(prefix=prefix, mime_type=normalized_mime)
@@ -170,14 +190,13 @@ class PresignedUploadRequest(BaseModel):
     file_size_bytes: StrictInt = Field(gt=0)
     purpose: PresignedUploadPurpose = "evidence"
 
-    @field_validator("mime_type")
+    @field_validator("mime_type", mode="before")
     @classmethod
-    def normalize_mime_type(cls, value: str) -> str:
-        """Trim surrounding spaces and normalize MIME type casing."""
-        cleaned = value.strip().lower()
-        if not cleaned:
-            raise ValueError("mime_type must not be blank.")
-        return cleaned
+    def normalize_mime_type(cls, value: object) -> object:
+        """Trim surrounding spaces and normalize MIME type casing before length checks."""
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
 
 class PresignedUploadResponse(BaseModel):
@@ -212,9 +231,21 @@ def _resolve_upload_target(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                 detail="Norm documents must use application/pdf MIME type.",
             )
-        return current_settings.MINIO_BUCKET_DOCUMENTS, "norms"
+        target_bucket = current_settings.MINIO_BUCKET_DOCUMENTS.strip()
+        if not target_bucket:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Document storage bucket is not configured.",
+            )
+        return target_bucket, "norms"
 
-    return current_settings.MINIO_BUCKET_EVIDENCES, "evidences"
+    target_bucket = current_settings.MINIO_BUCKET_EVIDENCES.strip()
+    if not target_bucket:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Evidence storage bucket is not configured.",
+        )
+    return target_bucket, "evidences"
 
 
 router = APIRouter(prefix="/storage", tags=["Storage"])
@@ -226,7 +257,11 @@ def request_presigned_upload(
     current_user: CurrentUser,
     s3_client: Annotated[S3ClientProtocol, Depends(get_s3_client)],
 ) -> PresignedUploadResponse:
-    """Validate upload metadata and return a 180-second presigned MinIO PUT URL."""
+    """Validate upload metadata and return a 180-second presigned MinIO PUT URL.
+
+    The caller must execute the HTTP PUT using the exact byte size and lowercase
+    Content-Type header signed in the returned URL.
+    """
     current_settings = get_settings()
     target_bucket, target_prefix = _resolve_upload_target(
         purpose=payload.purpose,
