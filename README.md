@@ -26,7 +26,7 @@ SOS-Animal/
 │   │   │   └── templates/   # Plantilla HTML/CSS del Documento de Denuncia (WeasyPrint)
 │   │   ├── migrations/      # Migraciones de esquema con Alembic
 │   │   └── tests/           # Suite pytest
-│   └── web/                 # Frontend en Astro + React Islands + Tailwind v4 (pnpm)
+│   └── web/                 # Frontend en Astro 7 + React Islands + Tailwind v4 (pnpm)
 │       └── src/
 │           ├── layouts/     # Shell responsivo (sidebar escritorio + barra inferior móvil)
 │           ├── pages/       # Rutas Astro públicas y protegidas
@@ -48,7 +48,7 @@ Para mantener entornos reproducibles en todo el equipo, respeta estrictamente es
 | Componente | Requisito | Gestor obligatorio | Prohibido |
 | :--- | :--- | :--- | :--- |
 | **Backend (`apps/api`)** | Python `3.12+` | `uv` | `pip`, `poetry`, venvs manuales |
-| **Frontend (`apps/web`)** | Node.js `22+` | `pnpm` (`11.17.0`) | `npm`, `yarn`, `bun` |
+| **Frontend (`apps/web`)** | Node.js `26 LTS` (mínimo `>= 22.23.4`) | `pnpm` (`11.17.0`) | `npm`, `yarn`, `bun` |
 | **Infraestructura** | Docker + Docker Compose | `docker compose` | — |
 
 > **Nota sobre WeasyPrint en local:** Al ejecutar el backend con Docker, las librerías nativas (`libpango`, `harfbuzz`, `gdk-pixbuf`, fuentes) ya vienen instaladas. Si ejecutas generación de PDF directamente en macOS o Linux fuera de Docker, necesitarás instalar dichas librerías del sistema para que `weasyprint` pueda cargar `libgobject-2.0`.
