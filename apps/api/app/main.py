@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.database import SessionDep
+from app.core.storage import router as storage_router
 from app.modules.auth.router import router as auth_router
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.complaints.router import router as complaints_router
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
         return ReadinessResponse(status="ready", database="ok")
 
     api_router.include_router(auth_router)
+    api_router.include_router(storage_router)
     api_router.include_router(complaints_router)
     api_router.include_router(directory_router)
     api_router.include_router(campaigns_router)

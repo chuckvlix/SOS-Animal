@@ -1,12 +1,16 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Annotated, Literal, Protocol
 from uuid import uuid4
 
 import boto3
 from botocore.client import BaseClient
 from botocore.config import Config
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
+from app.core.dependencies import CurrentUser
+from app.modules.auth.models import User, UserRole
 
 PRESIGNED_UPLOAD_EXPIRY_SECONDS: int = 180
 
@@ -151,4 +155,99 @@ def generate_presigned_upload(
         upload_url=upload_url,
         object_key=object_key,
         expires_in_seconds=PRESIGNED_UPLOAD_EXPIRY_SECONDS,
+    )
+
+
+PresignedUploadPurpose = Literal["evidence", "norm"]
+
+
+class PresignedUploadRequest(BaseModel):
+    """Metadata validated before issuing a time-limited S3/MinIO PUT URL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mime_type: str = Field(min_length=3, max_length=100)
+    file_size_bytes: StrictInt = Field(gt=0)
+    purpose: PresignedUploadPurpose = "evidence"
+
+    @field_validator("mime_type")
+    @classmethod
+    def normalize_mime_type(cls, value: str) -> str:
+        """Trim surrounding spaces and normalize MIME type casing."""
+        cleaned = value.strip().lower()
+        if not cleaned:
+            raise ValueError("mime_type must not be blank.")
+        return cleaned
+
+
+class PresignedUploadResponse(BaseModel):
+    """Presigned PUT URL details returned to authorized uploaders."""
+
+    upload_url: str
+    object_key: str
+    expires_in_seconds: int
+
+
+def get_s3_client() -> S3ClientProtocol:
+    """FastAPI dependency providing an S3 client bound to the public MinIO endpoint."""
+    return create_s3_client(get_settings().MINIO_PUBLIC_ENDPOINT)
+
+
+def _resolve_upload_target(
+    *,
+    purpose: PresignedUploadPurpose,
+    current_user: User,
+    normalized_mime: str,
+    current_settings: Settings,
+) -> tuple[str, str]:
+    """Enforce bucket-level RBAC and return the target (bucket, prefix) tuple."""
+    if purpose == "norm":
+        if current_user.role not in {UserRole.ADMIN, UserRole.GESTOR_CEMZOO}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions to upload norm documents.",
+            )
+        if normalized_mime != "application/pdf":
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Norm documents must use application/pdf MIME type.",
+            )
+        return current_settings.MINIO_BUCKET_DOCUMENTS, "norms"
+
+    return current_settings.MINIO_BUCKET_EVIDENCES, "evidences"
+
+
+router = APIRouter(prefix="/storage", tags=["Storage"])
+
+
+@router.post("/presigned-upload", response_model=PresignedUploadResponse)
+def request_presigned_upload(
+    payload: PresignedUploadRequest,
+    current_user: CurrentUser,
+    s3_client: Annotated[S3ClientProtocol, Depends(get_s3_client)],
+) -> PresignedUploadResponse:
+    """Validate upload metadata and return a 180-second presigned MinIO PUT URL."""
+    current_settings = get_settings()
+    target_bucket, target_prefix = _resolve_upload_target(
+        purpose=payload.purpose,
+        current_user=current_user,
+        normalized_mime=payload.mime_type,
+        current_settings=current_settings,
+    )
+
+    try:
+        result = generate_presigned_upload(
+            mime_type=payload.mime_type,
+            file_size_bytes=payload.file_size_bytes,
+            bucket=target_bucket,
+            prefix=target_prefix,
+            client=s3_client,
+        )
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return PresignedUploadResponse(
+        upload_url=result.upload_url,
+        object_key=result.object_key,
+        expires_in_seconds=result.expires_in_seconds,
     )
