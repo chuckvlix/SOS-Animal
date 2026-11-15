@@ -59,9 +59,16 @@ def track_complaint_public(
 def list_my_complaints(
     current_user: CurrentUser,
     session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ComplaintRead]:
     """List drafts and submitted complaints owned by the authenticated citizen."""
-    complaints = service.list_user_complaints(session=session, current_user=current_user)
+    complaints = service.list_user_complaints(
+        session=session,
+        current_user=current_user,
+        limit=limit,
+        offset=offset,
+    )
     return [ComplaintRead.model_validate(complaint) for complaint in complaints]
 
 
@@ -71,12 +78,16 @@ def list_institutional_complaints(
     session: SessionDep,
     status_filter: Annotated[ComplaintStatus | None, Query(alias="status")] = None,
     main_type: OffenseMainType | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ComplaintRead]:
     """List immutable submitted complaints for CEMZOO and administrator triage."""
     complaints = service.list_institutional_complaints(
         session=session,
         status_filter=status_filter,
         main_type=main_type,
+        limit=limit,
+        offset=offset,
     )
     return [ComplaintRead.model_validate(complaint) for complaint in complaints]
 
@@ -133,12 +144,14 @@ def delete_draft_complaint(
     complaint_id: uuid.UUID,
     current_user: CurrentUser,
     session: SessionDep,
+    s3_client: InternalS3Client,
 ) -> None:
     """Delete a mutable BORRADOR complaint."""
     service.delete_draft_complaint(
         session=session,
         current_user=current_user,
         complaint_id=complaint_id,
+        s3_client=s3_client,
     )
 
 
@@ -152,6 +165,7 @@ def add_evidence(
     payload: ComplaintEvidenceCreateRequest,
     current_user: CurrentUser,
     session: SessionDep,
+    s3_client: InternalS3Client,
 ) -> ComplaintEvidenceRead:
     """Attach an uploaded MinIO evidence object to a mutable BORRADOR complaint."""
     evidence = service.add_complaint_evidence(
@@ -159,6 +173,7 @@ def add_evidence(
         current_user=current_user,
         complaint_id=complaint_id,
         payload=payload,
+        s3_client=s3_client,
     )
     return ComplaintEvidenceRead.model_validate(evidence)
 
@@ -169,6 +184,7 @@ def remove_evidence(
     evidence_id: uuid.UUID,
     current_user: CurrentUser,
     session: SessionDep,
+    s3_client: InternalS3Client,
 ) -> None:
     """Remove an evidence attachment from a mutable BORRADOR complaint."""
     service.delete_complaint_evidence(
@@ -176,6 +192,7 @@ def remove_evidence(
         current_user=current_user,
         complaint_id=complaint_id,
         evidence_id=evidence_id,
+        s3_client=s3_client,
     )
 
 

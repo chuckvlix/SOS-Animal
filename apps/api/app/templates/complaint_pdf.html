@@ -80,6 +80,12 @@
         width: 180px;
       }
 
+      .description-text {
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin-top: 8px;
+      }
+
       .footer {
         margin-top: 28px;
         padding-top: 10px;
@@ -157,7 +163,7 @@
         </tr>
         {% endif %}
       </table>
-      <p>{{ description }}</p>
+      <p class="description-text">{{ description }}</p>
     </section>
 
     <section class="section">

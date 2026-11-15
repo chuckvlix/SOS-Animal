@@ -1,5 +1,7 @@
 """Business logic for complaints draft/submit lifecycle, immutability, and PDF rendering."""
 
+import logging
+import textwrap
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,7 +9,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from fastapi import HTTPException, status
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
@@ -19,9 +21,11 @@ from app.core.storage import (
     S3ClientProtocol,
     S3DocumentClientProtocol,
     UploadValidationError,
+    delete_storage_object,
     generate_presigned_download,
     upload_document_bytes,
     validate_upload_metadata,
+    verify_evidence_object,
 )
 from app.modules.auth.models import User, UserRole
 from app.modules.complaints.models import (
@@ -39,6 +43,8 @@ from app.modules.complaints.schemas import (
     ComplaintPublicTrackingRead,
     ComplaintUpdateRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 _JINJA_ENV = Environment(
@@ -124,7 +130,12 @@ def list_offense_categories(
     return list(session.exec(stmt).all())
 
 
-def _get_complaint_or_404(session: Session, complaint_id: uuid.UUID) -> Complaint:
+def _get_complaint_or_404(
+    session: Session,
+    complaint_id: uuid.UUID,
+    *,
+    lock_for_update: bool = False,
+) -> Complaint:
     stmt = (
         select(Complaint)
         .where(Complaint.id == complaint_id)
@@ -133,6 +144,8 @@ def _get_complaint_or_404(session: Session, complaint_id: uuid.UUID) -> Complain
             selectinload(Complaint.evidences),  # type: ignore[arg-type]
         )
     )
+    if lock_for_update:
+        stmt = stmt.with_for_update()
     complaint = session.exec(stmt).first()
     if complaint is None:
         raise HTTPException(
@@ -205,8 +218,14 @@ def create_draft_complaint(
     return _get_complaint_or_404(session, complaint.id)
 
 
-def list_user_complaints(*, session: Session, current_user: User) -> list[Complaint]:
-    """List all complaints created by the authenticated citizen, newest first."""
+def list_user_complaints(
+    *,
+    session: Session,
+    current_user: User,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Complaint]:
+    """List complaints created by the authenticated citizen, newest first."""
     stmt = (
         select(Complaint)
         .where(Complaint.user_id == current_user.id)
@@ -215,6 +234,8 @@ def list_user_complaints(*, session: Session, current_user: User) -> list[Compla
             selectinload(Complaint.evidences),  # type: ignore[arg-type]
         )
         .order_by(sa.desc(Complaint.created_at))  # type: ignore[arg-type]
+        .offset(offset)
+        .limit(limit)
     )
     return list(session.exec(stmt).all())
 
@@ -239,7 +260,7 @@ def update_draft_complaint(
     payload: ComplaintUpdateRequest,
 ) -> Complaint:
     """Update a mutable BORRADOR complaint; reject immutable complaints with HTTP 409."""
-    complaint = _get_complaint_or_404(session, complaint_id)
+    complaint = _get_complaint_or_404(session, complaint_id, lock_for_update=True)
     _ensure_complaint_owner(complaint, current_user)
     _ensure_mutable_draft(complaint)
 
@@ -249,12 +270,47 @@ def update_draft_complaint(
     ):
         _get_category_or_404(session, payload.offense_category_id)
 
-    for field_name in payload.model_fields_set:
-        setattr(complaint, field_name, getattr(payload, field_name))
-
-    session.add(complaint)
+    updates = {
+        field_name: getattr(payload, field_name)
+        for field_name in payload.model_fields_set
+    }
+    update_result = session.execute(
+        sa.update(Complaint)
+        .where(
+            Complaint.id == complaint.id,
+            Complaint.is_immutable == sa.false(),
+            Complaint.status == ComplaintStatus.BORRADOR,
+        )
+        .values(**updates)
+        .execution_options(synchronize_session=False)
+    )
+    if update_result.rowcount != 1:
+        session.rollback()
+        latest = _get_complaint_or_404(session, complaint_id)
+        _ensure_mutable_draft(latest)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Complaint state changed concurrently; cannot update draft.",
+        )
     session.commit()
+    session.expire_all()
     return _get_complaint_or_404(session, complaint.id)
+
+
+def _cleanup_evidence_objects(
+    *,
+    evidence_keys: list[str],
+    s3_client: S3DocumentClientProtocol,
+) -> None:
+    """Best-effort cleanup of MinIO evidence binaries after committed DB deletion."""
+    if not evidence_keys:
+        return
+    bucket = get_settings().MINIO_BUCKET_EVIDENCES.strip()
+    for object_key in evidence_keys:
+        try:
+            delete_storage_object(object_key=object_key, bucket=bucket, client=s3_client)
+        except UploadValidationError as exc:
+            logger.warning("Orphan evidence cleanup failed for %s: %s", object_key, exc)
 
 
 def delete_draft_complaint(
@@ -262,13 +318,34 @@ def delete_draft_complaint(
     session: Session,
     current_user: User,
     complaint_id: uuid.UUID,
+    s3_client: S3DocumentClientProtocol,
 ) -> None:
-    """Delete a mutable BORRADOR complaint; reject immutable complaints with HTTP 409."""
-    complaint = _get_complaint_or_404(session, complaint_id)
+    """Delete a mutable BORRADOR complaint and clean up attached MinIO evidence objects."""
+    complaint = _get_complaint_or_404(session, complaint_id, lock_for_update=True)
     _ensure_complaint_owner(complaint, current_user)
     _ensure_mutable_draft(complaint)
-    session.delete(complaint)
+    evidence_keys = [item.object_key for item in complaint.evidences]
+
+    session.execute(
+        sa.delete(ComplaintEvidence).where(ComplaintEvidence.complaint_id == complaint.id)
+    )
+    delete_result = session.execute(
+        sa.delete(Complaint).where(
+            Complaint.id == complaint.id,
+            Complaint.is_immutable == sa.false(),
+            Complaint.status == ComplaintStatus.BORRADOR,
+        )
+    )
+    if delete_result.rowcount != 1:
+        session.rollback()
+        latest = _get_complaint_or_404(session, complaint_id)
+        _ensure_mutable_draft(latest)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Complaint state changed concurrently; cannot delete draft.",
+        )
     session.commit()
+    _cleanup_evidence_objects(evidence_keys=evidence_keys, s3_client=s3_client)
 
 
 def add_complaint_evidence(
@@ -277,8 +354,9 @@ def add_complaint_evidence(
     current_user: User,
     complaint_id: uuid.UUID,
     payload: ComplaintEvidenceCreateRequest,
+    s3_client: S3DocumentClientProtocol,
 ) -> ComplaintEvidence:
-    """Attach an uploaded MinIO evidence object to a mutable BORRADOR complaint."""
+    """Attach a verified uploaded MinIO evidence object to a mutable BORRADOR complaint."""
     complaint = _get_complaint_or_404(session, complaint_id)
     _ensure_complaint_owner(complaint, current_user)
     _ensure_mutable_draft(complaint)
@@ -308,6 +386,20 @@ def add_complaint_evidence(
             detail=f"object_key extension must match '{expected_ext}' for '{payload.mime_type}'.",
         )
 
+    try:
+        verify_evidence_object(
+            object_key=payload.object_key,
+            expected_mime_type=payload.mime_type,
+            expected_size_bytes=payload.file_size_bytes,
+            client=s3_client,
+        )
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    locked_complaint = _get_complaint_or_404(session, complaint_id, lock_for_update=True)
+    _ensure_complaint_owner(locked_complaint, current_user)
+    _ensure_mutable_draft(locked_complaint)
+
     duplicate = session.exec(
         select(ComplaintEvidence).where(ComplaintEvidence.object_key == payload.object_key)
     ).first()
@@ -318,7 +410,7 @@ def add_complaint_evidence(
         )
 
     evidence = ComplaintEvidence(
-        complaint_id=complaint.id,
+        complaint_id=locked_complaint.id,
         evidence_type=payload.evidence_type,
         object_key=payload.object_key,
         mime_type=payload.mime_type,
@@ -344,9 +436,10 @@ def delete_complaint_evidence(
     current_user: User,
     complaint_id: uuid.UUID,
     evidence_id: uuid.UUID,
+    s3_client: S3DocumentClientProtocol,
 ) -> None:
-    """Remove an evidence item from a mutable BORRADOR complaint."""
-    complaint = _get_complaint_or_404(session, complaint_id)
+    """Remove an evidence item from a mutable BORRADOR complaint and delete its S3 object."""
+    complaint = _get_complaint_or_404(session, complaint_id, lock_for_update=True)
     _ensure_complaint_owner(complaint, current_user)
     _ensure_mutable_draft(complaint)
 
@@ -357,8 +450,30 @@ def delete_complaint_evidence(
             detail="Complaint evidence not found.",
         )
 
-    session.delete(evidence)
+    object_key = evidence.object_key
+    mutable_parent_subquery = select(Complaint.id).where(
+        Complaint.id == complaint.id,
+        Complaint.is_immutable == sa.false(),
+        Complaint.status == ComplaintStatus.BORRADOR,
+    )
+    delete_result = session.execute(
+        sa.delete(ComplaintEvidence).where(
+            ComplaintEvidence.id == evidence.id,
+            ComplaintEvidence.complaint_id == complaint.id,
+            ComplaintEvidence.complaint_id.in_(mutable_parent_subquery),
+        )
+    )
+    if delete_result.rowcount != 1:
+        session.rollback()
+        latest = _get_complaint_or_404(session, complaint_id)
+        _ensure_mutable_draft(latest)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Complaint evidence not found.",
+        )
+
     session.commit()
+    _cleanup_evidence_objects(evidence_keys=[object_key], s3_client=s3_client)
 
 
 def _format_utc(value: datetime | None, fallback: str) -> str:
@@ -368,18 +483,38 @@ def _format_utc(value: datetime | None, fallback: str) -> str:
     return normalized.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _restricted_url_fetcher(
-    url: str,
-    timeout: int = 10,
-    ssl_context: object | None = None,
-) -> dict[str, object]:
-    """Block all external or local file fetches inside WeasyPrint to prevent SSRF."""
-    raise ValueError(f"External resource fetching is disabled: {url}")
+class _RestrictedURLFetcher:
+    """Callable URL fetcher blocking external/local requests inside WeasyPrint."""
+
+    _fail_on_errors: bool = False
+
+    def __call__(
+        self,
+        url: str,
+        timeout: int = 10,
+        ssl_context: object | None = None,
+    ) -> dict[str, object]:
+        """Block all external or local file fetches inside WeasyPrint to prevent SSRF."""
+        raise ValueError(f"External resource fetching is disabled: {url}")
+
+
+_restricted_url_fetcher = _RestrictedURLFetcher()
 
 
 def _escape_pdf_text(text: str) -> str:
     ascii_safe = text.encode("latin-1", "replace").decode("latin-1")
     return ascii_safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _wrap_pdf_lines(raw_lines: list[str], width: int = 84) -> list[str]:
+    wrapped: list[str] = []
+    for raw in raw_lines:
+        for segment in raw.split("\n"):
+            if not segment.strip():
+                wrapped.append("")
+            else:
+                wrapped.extend(textwrap.wrap(segment, width=width) or [""])
+    return wrapped
 
 
 def _build_minimal_pdf_bytes(
@@ -389,40 +524,66 @@ def _build_minimal_pdf_bytes(
     complaint: Complaint,
     category: OffenseCategory,
 ) -> bytes:
-    """Generate a valid minimal single-page PDF fallback when native Pango libs are absent."""
-    lines = [
+    """Generate a valid PDF fallback including legal basis, facts, and evidence keys."""
+    raw_lines = [
         "SOS ANIMAL - SUCRE, BOLIVIA",
         "DOCUMENTO DE DENUNCIA",
         f"Codigo de seguimiento: {tracking_code}",
-        f"Fecha de emision: {_format_utc(complaint.submitted_at, '')}",
+        f"Fecha de emision: {_format_utc(complaint.submitted_at, 'Pendiente de envio definitivo')}",
         f"Denunciante: {owner.full_name} (CI: {owner.ci_number or 'N/A'})",
         f"Telefono: {owner.phone or 'N/A'} | Domicilio: {owner.address or 'N/A'}",
         f"Tipificacion: {category.main_type.value} - {category.subtype_name}",
+        f"Fundamento legal: {category.legal_basis}",
         f"Lugar del hecho: {complaint.incident_address}",
         f"Fecha del hecho: {_format_utc(complaint.incident_date, '')}",
-        f"Evidencias adjuntas: {len(complaint.evidences)}",
     ]
-    ops = ["BT", "/F1 11 Tf", "50 750 Td", "16 TL"]
-    for idx, line in enumerate(lines):
-        prefix = "" if idx == 0 else "T* "
-        ops.append(f"{prefix}({_escape_pdf_text(line)}) Tj")
-    ops.append("ET")
-    stream_bytes = "\n".join(ops).encode("latin-1")
+    if complaint.latitude is not None and complaint.longitude is not None:
+        raw_lines.append(f"Coordenadas GPS: {complaint.latitude}, {complaint.longitude}")
+    raw_lines.append("Relato de los hechos:")
+    raw_lines.append(complaint.description)
+    raw_lines.append(f"Evidencias adjuntas ({len(complaint.evidences)}):")
+    for item in complaint.evidences:
+        raw_lines.append(f"- {item.evidence_type.value}: {item.object_key} ({item.mime_type})")
 
-    objects = [
+    all_lines = _wrap_pdf_lines(raw_lines)
+    lines_per_page = 42
+    pages = [
+        all_lines[idx : idx + lines_per_page]
+        for idx in range(0, max(1, len(all_lines)), lines_per_page)
+    ]
+
+    page_obj_nums = [4 + idx * 2 for idx in range(len(pages))]
+    kids_ref = " ".join(f"{num} 0 R" for num in page_obj_nums)
+    objects: list[bytes] = [
         b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-        (
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n"
+        f"2 0 obj\n<< /Type /Pages /Kids [{kids_ref}] /Count {len(pages)} >>\nendobj\n".encode(
+            "ascii"
         ),
-        b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-        (
-            f"5 0 obj\n<< /Length {len(stream_bytes)} >>\nstream\n".encode("ascii")
+        b"3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    ]
+
+    for idx, page_lines in enumerate(pages):
+        page_num = 4 + idx * 2
+        content_num = 5 + idx * 2
+        ops = ["BT", "/F1 10 Tf", "50 750 Td", "15 TL"]
+        for line_idx, line in enumerate(page_lines):
+            prefix = "" if line_idx == 0 else "T* "
+            ops.append(f"{prefix}({_escape_pdf_text(line)}) Tj")
+        ops.append("ET")
+        stream_bytes = "\n".join(ops).encode("latin-1")
+        objects.append(
+            (
+                f"{page_num} 0 obj\n"
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content_num} 0 R >>\n"
+                f"endobj\n"
+            ).encode("ascii")
+        )
+        objects.append(
+            f"{content_num} 0 obj\n<< /Length {len(stream_bytes)} >>\nstream\n".encode("ascii")
             + stream_bytes
             + b"\nendstream\nendobj\n"
-        ),
-    ]
+        )
 
     output = bytearray(b"%PDF-1.4\n")
     offsets: list[int] = [0]
@@ -476,6 +637,16 @@ def render_complaint_html(*, session: Session, complaint: Complaint, owner: User
     )
 
 
+def _is_missing_weasyprint_libs_error(exc: OSError) -> bool:
+    message = str(exc).lower()
+    return (
+        "cannot load library" in message
+        or "dlopen" in message
+        or "libgobject" in message
+        or "libpango" in message
+    )
+
+
 def render_complaint_pdf_bytes(*, session: Session, complaint: Complaint, owner: User) -> bytes:
     """Render the Documento de Denuncia PDF with WeasyPrint (or dev fallback on missing libs)."""
     html = render_complaint_html(session=session, complaint=complaint, owner=owner)
@@ -488,7 +659,10 @@ def render_complaint_pdf_bytes(*, session: Session, complaint: Complaint, owner:
         ).write_pdf()
         return bytes(pdf_bytes)
     except OSError as exc:
-        if get_settings().ENVIRONMENT in {"staging", "production"}:
+        if (
+            get_settings().ENVIRONMENT in {"staging", "production"}
+            or not _is_missing_weasyprint_libs_error(exc)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="PDF rendering engine is unavailable in this environment.",
@@ -541,6 +715,15 @@ def _next_tracking_sequence(*, session: Session, year: int) -> int:
     return max_seq + 1
 
 
+def _cleanup_document_object(*, object_key: str, s3_client: S3DocumentClientProtocol) -> None:
+    """Best-effort cleanup if PDF upload succeeded before a failed DB commit."""
+    bucket = get_settings().MINIO_BUCKET_DOCUMENTS.strip()
+    try:
+        delete_storage_object(object_key=object_key, bucket=bucket, client=s3_client)
+    except UploadValidationError as exc:
+        logger.warning("Failed to clean up uncommitted PDF %s: %s", object_key, exc)
+
+
 def submit_complaint(
     *,
     session: Session,
@@ -548,7 +731,7 @@ def submit_complaint(
     complaint_id: uuid.UUID,
     s3_client: S3DocumentClientProtocol,
 ) -> Complaint:
-    """Validate legal profile completeness, freeze complaint, and upload PDF to MinIO."""
+    """Validate legal profile completeness, atomically freeze complaint, and upload PDF to MinIO."""
     complaint = _get_complaint_or_404(session, complaint_id)
     _ensure_complaint_owner(complaint, current_user)
     _ensure_mutable_draft(complaint)
@@ -574,21 +757,60 @@ def submit_complaint(
 
     submission_time = utc_now()
     year = submission_time.year
-    base_seq = _next_tracking_sequence(session=session, year=year)
+    min_next_seq = 1
 
-    for attempt in range(5):
-        tracking_code = f"SOS-{base_seq + attempt:06d}-{year}"
+    for _attempt in range(5):
+        seq = max(min_next_seq, _next_tracking_sequence(session=session, year=year))
+        min_next_seq = seq + 1
+        tracking_code = f"SOS-{seq:06d}-{year}"
+        object_key = f"complaints/{complaint.id}/{tracking_code}.pdf"
+
+        claim_stmt = (
+            sa.update(Complaint)
+            .where(
+                Complaint.id == complaint.id,
+                Complaint.is_immutable == sa.false(),
+                Complaint.status == ComplaintStatus.BORRADOR,
+            )
+            .values(
+                tracking_code=tracking_code,
+                submitted_at=submission_time,
+                status=ComplaintStatus.ENVIADA,
+                is_immutable=True,
+                pdf_url=object_key,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            claim_result = session.execute(claim_stmt)
+        except IntegrityError:
+            session.rollback()
+            complaint = _get_complaint_or_404(session, complaint_id)
+            _ensure_mutable_draft(complaint)
+            continue
+
+        if claim_result.rowcount != 1:
+            session.rollback()
+            complaint = _get_complaint_or_404(session, complaint_id)
+            _ensure_mutable_draft(complaint)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Complaint state changed concurrently; cannot submit.",
+            )
+
         complaint.tracking_code = tracking_code
         complaint.submitted_at = submission_time
         complaint.status = ComplaintStatus.ENVIADA
         complaint.is_immutable = True
+        complaint.pdf_url = object_key
 
-        pdf_bytes = render_complaint_pdf_bytes(
-            session=session,
-            complaint=complaint,
-            owner=current_user,
-        )
-        object_key = f"complaints/{complaint.id}/{tracking_code}.pdf"
+        with session.no_autoflush:
+            pdf_bytes = render_complaint_pdf_bytes(
+                session=session,
+                complaint=complaint,
+                owner=current_user,
+            )
+
         try:
             stored_key = upload_document_bytes(
                 data=pdf_bytes,
@@ -600,14 +822,23 @@ def submit_complaint(
             session.rollback()
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-        complaint.pdf_url = stored_key
-        session.add(complaint)
         try:
+            session.expire(complaint)
             session.commit()
-            return _get_complaint_or_404(session, complaint.id)
+            return _get_complaint_or_404(session, complaint_id)
         except IntegrityError:
             session.rollback()
+            _cleanup_document_object(object_key=stored_key, s3_client=s3_client)
             complaint = _get_complaint_or_404(session, complaint_id)
+            _ensure_mutable_draft(complaint)
+            continue
+        except SQLAlchemyError as exc:
+            session.rollback()
+            _cleanup_document_object(object_key=stored_key, s3_client=s3_client)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to finalize complaint submission.",
+            ) from exc
 
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
@@ -669,7 +900,6 @@ def get_public_tracking(*, session: Session, tracking_code: str) -> ComplaintPub
         subtype_name=complaint.offense_category.subtype_name,
         legal_basis=complaint.offense_category.legal_basis,
         incident_date=complaint.incident_date,
-        incident_address=complaint.incident_address,
         created_at=complaint.created_at,
         submitted_at=complaint.submitted_at,
     )
@@ -680,6 +910,8 @@ def list_institutional_complaints(
     session: Session,
     status_filter: ComplaintStatus | None = None,
     main_type: OffenseMainType | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[Complaint]:
     """List submitted complaints for CEMZOO/Admin management, excluding mutable drafts."""
     stmt = (
@@ -696,7 +928,11 @@ def list_institutional_complaints(
         stmt = stmt.where(Complaint.status == status_filter)
     if main_type is not None:
         stmt = stmt.join(OffenseCategory).where(OffenseCategory.main_type == main_type)
-    stmt = stmt.order_by(sa.desc(Complaint.submitted_at))  # type: ignore[arg-type]
+    stmt = (
+        stmt.order_by(sa.desc(Complaint.submitted_at))  # type: ignore[arg-type]
+        .offset(offset)
+        .limit(limit)
+    )
     return list(session.exec(stmt).all())
 
 
@@ -706,25 +942,45 @@ def update_complaint_status(
     complaint_id: uuid.UUID,
     new_status: ComplaintStatus,
 ) -> Complaint:
-    """Transition an immutable submitted complaint through CEMZOO institutional states."""
-    complaint = _get_complaint_or_404(session, complaint_id)
+    """Atomically transition an immutable submitted complaint through CEMZOO states."""
+    complaint = _get_complaint_or_404(session, complaint_id, lock_for_update=True)
     if not complaint.is_immutable or complaint.status == ComplaintStatus.BORRADOR:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Draft complaints must be submitted before institutional status updates.",
         )
 
-    allowed_next = _ALLOWED_INSTITUTIONAL_TRANSITIONS.get(complaint.status, frozenset())
+    current_status = complaint.status
+    allowed_next = _ALLOWED_INSTITUTIONAL_TRANSITIONS.get(current_status, frozenset())
     if new_status not in allowed_next:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Cannot transition complaint status from {complaint.status.value} "
+                f"Cannot transition complaint status from {current_status.value} "
                 f"to {new_status.value}."
             ),
         )
 
-    complaint.status = new_status
-    session.add(complaint)
+    update_result = session.execute(
+        sa.update(Complaint)
+        .where(
+            Complaint.id == complaint.id,
+            Complaint.is_immutable == sa.true(),
+            Complaint.status == current_status,
+        )
+        .values(status=new_status)
+        .execution_options(synchronize_session=False)
+    )
+    if update_result.rowcount != 1:
+        session.rollback()
+        latest = _get_complaint_or_404(session, complaint_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Complaint status changed concurrently to {latest.status.value}; "
+                f"cannot transition to {new_status.value}."
+            ),
+        )
     session.commit()
+    session.expire_all()
     return _get_complaint_or_404(session, complaint.id)

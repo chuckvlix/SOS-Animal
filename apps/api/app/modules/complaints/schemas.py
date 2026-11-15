@@ -17,7 +17,7 @@ EVIDENCE_OBJECT_KEY_PATTERN = re.compile(
     r"^evidences/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
     r"\.(jpg|png|webp|mp4|pdf)$"
 )
-TRACKING_CODE_PATTERN = re.compile(r"^SOS-\d{6}-\d{4}$")
+TRACKING_CODE_PATTERN = re.compile(r"^SOS-[0-9]{6}-[0-9]{4}$")
 
 
 def _strip_if_str(value: object) -> object:
@@ -40,6 +40,8 @@ def _clean_single_line_text(value: str, field_name: str, min_len: int, max_len: 
         raise ValueError(f"{field_name} contains disallowed control or invisible characters.")
     if len(cleaned) < min_len or len(cleaned) > max_len:
         raise ValueError(f"{field_name} must be between {min_len} and {max_len} characters.")
+    if len(" ".join(cleaned.split())) < min_len:
+        raise ValueError(f"{field_name} must contain at least {min_len} meaningful characters.")
     if "<" in cleaned or ">" in cleaned:
         raise ValueError(f"{field_name} must not contain '<' or '>' characters.")
     return cleaned
@@ -54,6 +56,8 @@ def _clean_multiline_text(value: str, field_name: str, min_len: int, max_len: in
             raise ValueError(f"{field_name} contains disallowed control or invisible characters.")
     if len(normalized) < min_len or len(normalized) > max_len:
         raise ValueError(f"{field_name} must be between {min_len} and {max_len} characters.")
+    if len(" ".join(normalized.split())) < min_len:
+        raise ValueError(f"{field_name} must contain at least {min_len} meaningful characters.")
     if "<" in normalized or ">" in normalized:
         raise ValueError(f"{field_name} must not contain '<' or '>' characters.")
     return normalized
@@ -285,7 +289,7 @@ class ComplaintDownloadUrlResponse(BaseModel):
 
 
 class ComplaintPublicTrackingRead(BaseModel):
-    """Privacy-safe public status lookup response without citizen PII."""
+    """Privacy-safe public status lookup response omitting citizen PII and exact address."""
 
     tracking_code: str
     status: ComplaintStatus
@@ -293,7 +297,6 @@ class ComplaintPublicTrackingRead(BaseModel):
     subtype_name: str
     legal_basis: str
     incident_date: datetime
-    incident_address: str
     created_at: datetime
     submitted_at: datetime
 
