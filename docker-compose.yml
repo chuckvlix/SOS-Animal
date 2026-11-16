@@ -22,7 +22,7 @@ services:
       retries: 10
 
   storage:
-    image: minio/minio:latest
+    image: pgsty/silo:latest
     container_name: sos_animal_storage
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -37,7 +37,7 @@ services:
       - minio_data:/data
 
   storage-init:
-    image: minio/mc:latest
+    image: pgsty/mc:latest
     container_name: sos_animal_storage_init
     depends_on:
       storage:
