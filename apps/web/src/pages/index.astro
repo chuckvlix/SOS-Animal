@@ -1,11 +1,18 @@
 ---
+import AboutMissionSection from "../components/landing/AboutMissionSection.astro";
+import CommunityShowcaseSection from "../components/landing/CommunityShowcaseSection.astro";
+import ComplaintProcessSection from "../components/landing/ComplaintProcessSection.astro";
+import EmergencyCtaBand from "../components/landing/EmergencyCtaBand.astro";
 import HeroBanner from "../components/landing/HeroBanner.astro";
-import ServicesGrid from "../components/landing/ServicesGrid.astro";
-import { CITIZEN_SERVICES } from "../data/landing";
+import LegalFrameworkSection from "../components/landing/LegalFrameworkSection.astro";
 import MainLayout from "../layouts/MainLayout.astro";
 ---
 
 <MainLayout title="Inicio">
   <HeroBanner />
-  <ServicesGrid services={CITIZEN_SERVICES} />
+  <AboutMissionSection />
+  <ComplaintProcessSection />
+  <CommunityShowcaseSection />
+  <LegalFrameworkSection />
+  <EmergencyCtaBand />
 </MainLayout>

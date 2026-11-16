@@ -1,0 +1,46 @@
+---
+import BrandLogo from "../brand/BrandLogo.astro";
+import Icon from "../ui/Icon.astro";
+---
+
+<section
+  class="mt-12 rounded-3xl bg-primary p-6 text-white shadow-sm sm:p-8 lg:p-10"
+>
+  <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+    <div class="min-w-0 max-w-2xl">
+      <p class="m-0 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary-soft">
+        <Icon name="sos" class="h-4 w-4" />
+        <span>Atención prioritaria ante crueldad o biocidio</span>
+      </p>
+      <h2 class="mt-2 font-display text-2xl font-bold leading-snug text-white lg:text-3xl">
+        ¿Presenciaste un caso de maltrato o un animal en peligro?
+      </h2>
+      <p class="mt-2 text-sm leading-relaxed text-primary-soft sm:text-base">
+        Reúne fotografías o videos de respaldo y genera tu documento de denuncia guiado paso a paso, o ubica de inmediato un centro veterinario de urgencia.
+      </p>
+
+      <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+        <a
+          href="/denunciar"
+          class="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full border border-white/25 bg-sos px-6 py-3 text-sm font-semibold text-white no-underline transition-opacity hover:opacity-95"
+        >
+          <Icon name="sos" class="h-4 w-4" />
+          <span>Iniciar Denuncia SOS</span>
+        </a>
+        <a
+          href="/mapa"
+          class="inline-flex min-h-[48px] items-center justify-center rounded-full bg-bg-surface px-6 py-3 text-sm font-semibold text-primary no-underline transition-colors hover:bg-primary-soft"
+        >
+          Ver urgencias veterinarias
+        </a>
+      </div>
+    </div>
+
+    <div
+      aria-hidden="true"
+      class="hidden shrink-0 items-center justify-center rounded-full border-4 border-white/20 bg-bg-surface p-6 shadow-sm lg:inline-flex"
+    >
+      <BrandLogo class="h-20 w-20 text-primary" />
+    </div>
+  </div>
+</section>
