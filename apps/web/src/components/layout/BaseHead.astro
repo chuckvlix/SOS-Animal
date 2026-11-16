@@ -1,0 +1,27 @@
+---
+import { BRAND_NAME } from "../../data/navigation";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const trimmedTitle = title.trim();
+const pageTitle = trimmedTitle ? `${trimmedTitle} | ${BRAND_NAME}` : BRAND_NAME;
+---
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content={description} />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap"
+    rel="stylesheet"
+  />
+  <title>{pageTitle}</title>
+  <slot />
+</head>

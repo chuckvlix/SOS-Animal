@@ -1,0 +1,58 @@
+---
+import { NAV_ITEMS, isActiveRoute } from "../../data/navigation";
+import type { NavItem } from "../../types/ui";
+import BrandLockup from "../brand/BrandLockup.astro";
+import Icon from "../ui/Icon.astro";
+import JurisdictionBadge from "../ui/JurisdictionBadge.astro";
+
+interface Props {
+  currentPath: string;
+  items?: readonly NavItem[];
+}
+
+const { currentPath, items = NAV_ITEMS } = Astro.props;
+---
+
+<aside
+  class="fixed inset-y-0 start-0 z-30 hidden w-[260px] flex-col justify-between border-e border-border bg-bg-surface p-5 lg:flex"
+>
+  <div>
+    <BrandLockup size="md" showSubtitle class="mb-6" />
+
+    <nav aria-label="Principal">
+      <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
+        {
+          items.map((item) => {
+            const active = isActiveRoute(currentPath, item.href);
+            return (
+              <li>
+                <a
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  class:list={[
+                    "flex items-center gap-3 rounded-lg border-s-4 px-3 py-2.5 text-sm no-underline transition-colors",
+                    item.isSos
+                      ? active
+                        ? "border-text-primary bg-sos font-semibold text-white"
+                        : "border-transparent bg-sos-soft font-semibold text-sos-text hover:bg-sos hover:text-white"
+                      : active
+                        ? "border-primary bg-primary-soft font-semibold text-primary"
+                        : "border-transparent font-medium text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
+                  ]}
+                >
+                  <Icon name={item.icon} class="h-5 w-5" />
+                  <span>{item.label}</span>
+                </a>
+              </li>
+            );
+          })
+        }
+      </ul>
+    </nav>
+  </div>
+
+  <div class="border-t border-border pt-4">
+    <p class="m-0 text-xs font-medium text-text-secondary">Jurisdicción activa</p>
+    <JurisdictionBadge size="md" class="mt-1" />
+  </div>
+</aside>
