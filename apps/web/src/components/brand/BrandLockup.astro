@@ -1,0 +1,39 @@
+---
+import { BRAND_NAME, BRAND_TAGLINE } from "../../data/navigation";
+import BrandLogo from "./BrandLogo.astro";
+
+interface Props {
+  href?: string;
+  size?: "sm" | "md";
+  showSubtitle?: boolean;
+  subtitle?: string;
+  class?: string;
+}
+
+const {
+  href = "/",
+  size = "md",
+  showSubtitle = false,
+  subtitle = BRAND_TAGLINE,
+  class: className,
+} = Astro.props;
+
+const logoClass = size === "sm" ? "h-7 w-7 text-primary" : "h-8 w-8 text-primary";
+const gapClass = size === "sm" ? "gap-2.5" : "gap-3";
+---
+
+<a href={href} class:list={["flex items-center no-underline", gapClass, className]}>
+  <BrandLogo class={logoClass} />
+  {
+    showSubtitle ? (
+      <div>
+        <span class="block font-display text-lg font-bold leading-tight text-text-primary">
+          {BRAND_NAME}
+        </span>
+        <span class="block text-xs text-text-secondary">{subtitle}</span>
+      </div>
+    ) : (
+      <span class="font-display text-lg font-bold text-text-primary">{BRAND_NAME}</span>
+    )
+  }
+</a>

@@ -1,0 +1,68 @@
+---
+import { DESKTOP_NAV_ITEMS, SOS_NAV_ITEM, isActiveRoute } from "../../data/navigation";
+import SessionComplaintsLink from "../../islands/SessionComplaintsLink";
+import type { NavItem } from "../../types/ui";
+import BrandLockup from "../brand/BrandLockup.astro";
+import Icon from "../ui/Icon.astro";
+
+interface Props {
+  currentPath: string;
+  items?: readonly NavItem[];
+}
+
+const { currentPath, items = DESKTOP_NAV_ITEMS } = Astro.props;
+const sosActive = isActiveRoute(currentPath, SOS_NAV_ITEM.href);
+---
+
+<header
+  class="sticky top-0 z-30 hidden border-b border-border bg-bg-surface/95 backdrop-blur-sm lg:block"
+>
+  <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3 xl:px-8">
+    <BrandLockup size="md" class="shrink-0" />
+
+    <nav aria-label="Principal" class="min-w-0">
+      <ul class="m-0 flex list-none items-center gap-1 p-0 xl:gap-1.5">
+        {
+          items.map((item) => {
+            const active = isActiveRoute(currentPath, item.href);
+            return (
+              <li>
+                <a
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  class:list={[
+                    "inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-t-md border-b-2 px-2.5 py-2 text-[13px] no-underline transition-colors xl:px-3 xl:text-sm",
+                    active
+                      ? "border-primary bg-primary-soft/60 font-semibold text-primary"
+                      : "border-transparent font-medium text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
+                  ]}
+                >
+                  <Icon name={item.icon} class="h-4 w-4" />
+                  <span>{item.desktopLabel ?? item.label}</span>
+                </a>
+              </li>
+            );
+          })
+        }
+      </ul>
+    </nav>
+
+    <div class="flex shrink-0 items-center gap-2">
+      <SessionComplaintsLink client:load currentPath={currentPath} />
+
+      <a
+        href={SOS_NAV_ITEM.href}
+        aria-current={sosActive ? "page" : undefined}
+        class:list={[
+          "inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 py-2 text-xs font-semibold no-underline transition-colors xl:text-sm",
+          sosActive
+            ? "border-text-primary bg-sos text-white"
+            : "border-transparent bg-sos text-white hover:opacity-95",
+        ]}
+      >
+        <Icon name={SOS_NAV_ITEM.icon} class="h-4 w-4" />
+        <span>{SOS_NAV_ITEM.desktopLabel ?? SOS_NAV_ITEM.label}</span>
+      </a>
+    </div>
+  </div>
+</header>

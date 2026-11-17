@@ -1,0 +1,44 @@
+---
+import type { IconName } from "../../types/ui";
+
+interface Props {
+  name: IconName;
+  class?: string;
+  label?: string;
+}
+
+const ICON_PATHS: Record<IconName, string> = {
+  home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1v-9.5Z",
+  sos: "M12 3 4 6.5V12c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6.5L12 3Zm0 5.5v4m0 3.5h.01",
+  map: "M12 21s-6-5.2-6-10a6 6 0 1 1 12 0c0 4.8-6 10-6 10Zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z",
+  health:
+    "M12 21s-7-4.4-9-8.5C1.5 9.2 3.6 5.5 7 5.5c2 0 3.7 1.1 5 2.7 1.3-1.6 3-2.7 5-2.7 3.4 0 5.5 3.7 4 7-2 4.1-9 8.5-9 8.5Z",
+  legal:
+    "M12 3v18M7 21h10M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2m-19 8 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Zm14 0 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z",
+  education:
+    "M12 6.25a6.5 6.5 0 0 0-4.5-1.75H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3.5A4.5 4.5 0 0 1 12 19.25m0-13a6.5 6.5 0 0 1 4.5-1.75H20a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-3.5A4.5 4.5 0 0 0 12 19.25m0-13v13",
+  cases: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M9 13h6m-6 4h4",
+  shield: "M12 3 4 6.5V12c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6.5L12 3Zm-3 9.5 2 2 4-4",
+  check: "M5 13l4 4L19 7",
+  "arrow-right": "M5 12h14m-6-6 6 6-6 6",
+};
+
+const { name, class: className = "h-5 w-5", label } = Astro.props;
+const trimmedLabel = label?.trim();
+const isInformative = Boolean(trimmedLabel);
+---
+
+<svg
+  class:list={["shrink-0", className]}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="1.75"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  role={isInformative ? "img" : undefined}
+  aria-label={isInformative ? trimmedLabel : undefined}
+  aria-hidden={isInformative ? undefined : "true"}
+>
+  <path d={ICON_PATHS[name]} />
+</svg>
