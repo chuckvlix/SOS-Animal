@@ -90,28 +90,31 @@ Se combinan dos familias tipográficas gratuitas de Google Fonts para equilibrar
 
 ## 4. Arquitectura de Navegación y Layout Multiplataforma
 
-La aplicación debe operar bajo una estructura unificada de **5 módulos principales**, evitando cambiar los íconos de navegación entre pantallas.
+La plataforma web adopta una arquitectura de **portal ciudadano informativo y de acceso directo** (orientada a la difusión pública de derechos, directorio veterinario, salud preventiva, educación y acceso inmediato a denuncias), evitando encerrar la experiencia web en un tablero administrativo lateral.
 
 ### 4.1 Destinos de Navegación Global
-1. **Inicio** (`Home`): Resumen rápido, botón de emergencia SOS, accesos directos y campañas activas.
-2. **Denunciar SOS** (`AlertMegaphone` / `ShieldAlert`): Flujo guiado en 7 pasos para denuncias de maltrato o biocidio. Destacado visualmente con acento `--color-sos` (`#E11D48`).
-3. **Zoonosis y Veterinarias** (`MapPin` / `PawPrint`): Mapa interactivo con filtros (CEMZOO, clínicas 24h, urgencias) y cálculo de distancia.
-4. **Salud y Vacunas** (`Syringe` / `HeartPulse`): Calendario de vacunación, campañas de esterilización y guías de cuidado preventivo.
-5. **Normativa Legal** (`Scale`): Buscador y lectura simplificada de leyes nacionales y municipales vigentes.
-6. **Mis Denuncias** (`FileText` — en sidebar web o perfil móvil): Historial de casos enviados, descarga de PDF y consulta de estado por código.
+1. **Inicio** (`Home` -> `/`): Portada informativa con acceso directo SOS, consulta de seguimiento, ruta digital de 7 pasos, servicios ciudadanos y marco jurídico.
+2. **Zoonosis y Veterinarias** (`MapPin` -> `/mapa`): Mapa interactivo con filtros (CEMZOO, clínicas 24h, urgencias) y cálculo de distancia.
+3. **Salud y Vacunas** (`Heart` -> `/campanas`): Calendario de vacunación, campañas de esterilización y jornadas preventivas.
+4. **Normativa Legal** (`Scale` -> `/normativa`): Buscador y lectura simplificada de leyes nacionales y municipales vigentes con PDFs oficiales.
+5. **Educación y Prevención** (`BookOpen` -> `/educacion`): Guías ciudadanas de tenencia responsable y prevención del maltrato animal.
+6. **Denunciar SOS** (`ShieldAlert` -> `/denunciar`): Flujo guiado en 7 pasos para denuncias de maltrato o biocidio. Destacado visualmente con acento `--color-sos` (`#E11D48`).
+7. **Mis Denuncias** (`FileText` -> `/mis-denuncias`): Visible en escritorio únicamente cuando el ciudadano cuenta con sesión autenticada activa; historial de casos, descarga de PDF y estado.
 
 ### 4.2 Adaptación por Dispositivo
 
 #### Vista Web / Escritorio (`>= 1024px`)
-* **Sidebar Izquierda Fija (`260px`):** Contiene el logotipo `SOS Animal`, los 5 enlaces de navegación + `Mis Denuncias`, y al pie el botón `Cerrar sesión` junto al indicador de ubicación (`Sucre, Bolivia`).
-* **Área Principal de Trabajo (`1fr`):**
-  * **En el Flujo de Denuncia (Layout de 2 Columnas `60% / 40%`):**
+* **Barra Superior Fija (`sticky top-0`):** Contiene el logotipo `SOS Animal`, los enlaces informativos principales (`Inicio`, `Veterinarias`, `Salud y Vacunas`, `Normativa`, `Educación y Prevención`), el acceso condicional `Mis Denuncias` (solo con sesión activa) y el botón destacado `Denunciar SOS`.
+* **Pie de Página Web (`WebFooter`):** Visible en escritorio (`>= 1024px`) con identidad de marca, insignia de jurisdicción (`Sucre, Bolivia`), enlaces de servicio público (incluyendo `/seguimiento` y `/educacion`) e instituciones receptoras.
+* **Área Principal de Trabajo:**
+  * **En Portada y Vistas Informativas:** Contenedor centrado (`max-w-6xl`) con secciones modulares claras, alta legibilidad e información ciudadana prioritaria.
+  * **En el Flujo de Denuncia (`/denunciar`, Layout de 2 Columnas `60% / 40%`):**
     * *Columna Izquierda:* Formulario paso a paso dentro de una tarjeta blanca (`#FFFFFF`).
     * *Columna Derecha (Sticky):* Panel superior con **Sustento Legal Detectado** (fondo `#F3E8FF`) y panel inferior con **Vista Previa en Vivo del PDF** (*"Generando PDF automáticamente..."*) que actualiza el Documento de Denuncia en tiempo real conforme el usuario completa los campos.
 
-#### Vista Móvil (`< 768px`)
-* **Header Superior (`56px`):** Isotipo + nombre `SOS Animal` a la izquierda; badge de ubicación (`Sucre`) o botón de retroceso (`←`) en subpáginas.
-* **Bottom Navigation Bar Fija (`64px`):** 5 ítems fijos (`Inicio`, `Mapa`, botón central elevado `SOS`, `Salud`, `Leyes`).
+#### Vista Móvil y Tablet (`< 1024px`)
+* **Header Superior (`56px`):** Isotipo + nombre `SOS Animal` a la izquierda; badge de ubicación (`Sucre, Bolivia`).
+* **Bottom Navigation Bar Fija:** 5 ítems fijos (`Inicio`, `Mapa`, botón central elevado `SOS`, `Salud`, `Leyes`). El pie de página web (`WebFooter`) se mantiene oculto en pantallas `< 1024px` para priorizar la lectura y los accesos táctiles esenciales.
 * **Ergonomía:** Todas las áreas táctiles deben medir mínimo `48px x 48px`. Los botones principales de avance (`Siguiente`) se ubican en la zona inferior accesible con el pulgar.
 
 ---

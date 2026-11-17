@@ -7,7 +7,7 @@ import type {
 } from "../types/ui";
 
 export const HERO_CONTENT: HeroContent = {
-  badge: "Plataforma pública de protección animal yorientación jurídica",
+  badge: "Plataforma pública de protección animal y orientación jurídica",
   titleStart: "Protege y defiende a",
   titleHighlight: "los animales",
   description:
@@ -33,7 +33,7 @@ export const ABOUT_MISSION_CONTENT: AboutMissionContent = {
   titleStart: "Porque cada vida merece",
   titleHighlight: "respeto y justicia",
   description:
-    "SOS Animal reúne orientación jurídica, educación preventiva en un espacio claro y un directorio georeferenciado de Zoonosis y centros veterinarios  accesibles para toda la población.",
+    "SOS Animal reúne orientación jurídica, educación preventiva en un espacio claro y un directorio georreferenciado de Zoonosis y centros veterinarios accesibles para toda la población.",
   points: [
     "Acceso inmediato a normativa, mapas y educación",
     "Ruta guiada en 7 pasos para iniciar una denuncia",
@@ -45,9 +45,8 @@ export const ABOUT_MISSION_CONTENT: AboutMissionContent = {
     href: "/normativa",
   },
   image: {
-    src: "https://images.unsplash.com/photo-1450778869180-41d0601e046e?auto=format&fit=crop&w=960&h=640&q=80",
-    srcSet:
-      "https://images.unsplash.com/photo-1450778869180-41d0601e046e?auto=format&fit=crop&w=640&h=427&q=80 640w, https://images.unsplash.com/photo-1450778869180-41d0601e046e?auto=format&fit=crop&w=960&h=640&q=80 960w",
+    src: "/images/about-mission-960.webp",
+    srcSet: "/images/about-mission-640.webp 640w, /images/about-mission-960.webp 960w",
     sizes: "(max-width: 1023px) 100vw, 460px",
     alt: "Perro y gato descansando juntos sobre césped verde bajo protección y cuidado responsable",
     width: 960,
@@ -104,7 +103,7 @@ export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
     ctaLabel: "Explorar mapa veterinario",
     accent: "secondary",
     image: {
-      src: "https://images.unsplash.com/photo-1644675272883-0c4d582528d8?auto=format&fit=crop&w=640&h=420&q=80",
+      src: "/images/community-vet.webp",
       alt: "Médico veterinario examinando a un cachorro sobre una mesa clínica",
       width: 640,
       height: 420,
@@ -119,7 +118,7 @@ export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
     ctaLabel: "Ver calendario de campañas",
     accent: "secondary",
     image: {
-      src: "https://images.unsplash.com/photo-1630438994394-3deff7a591bf?auto=format&fit=crop&w=640&h=420&q=80",
+      src: "/images/community-campaigns.webp",
       alt: "Perro pequeño atendido sobre camilla en consultorio veterinario",
       width: 640,
       height: 420,
@@ -134,7 +133,7 @@ export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
     ctaLabel: "Ir a educación y prevención",
     accent: "primary",
     image: {
-      src: "https://images.unsplash.com/photo-1522276498395-f4f68f7f8454?auto=format&fit=crop&w=640&h=420&q=80",
+      src: "/images/community-education.webp",
       alt: "Persona abrazando con afecto a un perro feliz al aire libre",
       width: 640,
       height: 420,

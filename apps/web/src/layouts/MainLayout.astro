@@ -25,13 +25,15 @@ const currentPath = Astro.url.pathname;
     <slot name="head" />
   </BaseHead>
   <body class="flex min-h-dvh flex-col bg-bg-canvas text-text-primary antialiased">
+    <a href="#main-content" class="skip-link visually-hidden">
+      Saltar al contenido principal
+    </a>
 
     <MobileHeader />
     <DesktopNavbar currentPath={currentPath} />
 
     <main
       id="main-content"
-      tabindex="-1"
       class="flex-1 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pt-0 lg:pb-12"
     >
       <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -41,5 +43,30 @@ const currentPath = Astro.url.pathname;
 
     <WebFooter />
     <MobileBottomNav currentPath={currentPath} />
+
+    <script>
+      const skipLink = document.querySelector<HTMLAnchorElement>(".skip-link");
+      skipLink?.addEventListener("click", (event) => {
+        const heading = document.querySelector<HTMLElement>("#main-content h1");
+        const fallback = document.getElementById("main-content");
+        const target = heading ?? fallback;
+        if (!target) {
+          return;
+        }
+        event.preventDefault();
+        if (!target.hasAttribute("tabindex")) {
+          target.setAttribute("tabindex", "-1");
+          target.addEventListener(
+            "blur",
+            () => {
+              target.removeAttribute("tabindex");
+            },
+            { once: true },
+          );
+        }
+        target.scrollIntoView({ block: "start" });
+        target.focus({ preventScroll: true });
+      });
+    </script>
   </body>
 </html>

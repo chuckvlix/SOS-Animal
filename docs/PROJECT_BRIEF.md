@@ -63,7 +63,7 @@ sos-animal-sucre/
 │   │   ├── package.json
 │   │   └── src/
 │   │       ├── layouts/       # Layouts públicos y protegidos
-│   │       ├── pages/         # /, /mapa, /campanas, /normativa, /educacion, /seguimiento, /denunciar, /panel/*
+│   │       ├── pages/         # /, /mapa, /campanas, /normativa, /educacion, /seguimiento, /denunciar, /mis-denuncias, /panel/*
 │   │       ├── islands/       # Componentes React: VetMap, ComplaintWizard, AdminCRUDs, AuthForms
 │   │       └── services/      # Cliente API, interceptores JWT y subida a URLs pre-firmadas
 │   └── mobile/                # (Fase 2) Aplicación React Native + Expo
@@ -99,8 +99,8 @@ sos-animal-sucre/
 ## 5. Reglas Críticas de Negocio y Seguridad
 
 1. **Vistas Públicas vs. Vistas Protegidas:**
-   * **Público (Sin Login):** Landing informativa, Ubicación de Zoonosis y centros veterinarios en mapa interactivo, Información de vacunación/esterilización/atención, Normativa vigente (con descarga de PDFs), Educación/prevención del maltrato animal y consulta de seguimiento por código[cite: 2, 3].
-   * **Protegido (Requiere JWT):** Asistente de 7 pasos de denuncia (`ciudadano`)[cite: 2] y Panel de Administración CRUD (`gestor_cemzoo` y `admin`).
+   * **Público (Sin Login — Portal Ciudadano con Navbar Superior):** Landing informativa centrada en orientación y servicios comunitarios, Ubicación de Zoonosis y centros veterinarios en mapa interactivo, Información de vacunación/esterilización/atención, Normativa vigente (con descarga de PDFs), Educación/prevención del maltrato animal y consulta de seguimiento por código[cite: 2, 3].
+   * **Protegido (Requiere JWT):** Asistente de 7 pasos de denuncia (`/denunciar`), historial personal (`/mis-denuncias`, visible en navegación tras autenticarse) y Panel de Administración CRUD (`/panel/*` para `gestor_cemzoo` y `admin`)[cite: 2].
 2. **Flujo Inmutable de la Denuncia (7 Pasos):**
    * **Pasos 1 al 5:** Selección de "Denunciar maltrato o biocidio" -> Tipo de denuncia -> Modalidad específica -> Visualización automática del fundamento legal -> Formulario de datos del denunciante (completando CI, teléfono y domicilio si no existían en su perfil), datos del hecho y carga de evidencias[cite: 2]. Se guarda en estado `BORRADOR` (`is_immutable = False`).
    * **Paso 6 (Previsualización):** Generación de vista previa del Documento de Denuncia para revisión del usuario[cite: 2].
