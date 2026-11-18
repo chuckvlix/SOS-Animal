@@ -88,12 +88,13 @@ def _create_user(
     session: Session,
     *,
     email: str,
+    full_name: str = "Usuario Prueba",
     password: str = "SucreAnimal2026!",
     role: UserRole = UserRole.CIUDADANO,
     is_active: bool = True,
 ) -> User:
     user = User(
-        full_name="Usuario Prueba",
+        full_name=full_name,
         email=email,
         password_hash=hash_password(password),
         role=role,
@@ -610,3 +611,121 @@ def test_storage_hardening_empty_bucket_trimming_and_real_sigv4_headers(
     )
     assert "X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost" in real_res.upload_url
     assert "X-Amz-Expires=180" in real_res.upload_url
+
+
+def test_admin_list_users_rbac_filters_search_and_pagination(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    """Only admin can list users; supports role filtering, safe LIKE search, and pagination."""
+    assert api_client.get("/api/v1/auth/users").status_code == 401
+
+    citizen = _create_user(
+        db_session,
+        email="maria.lopez@example.com",
+        full_name="María López 100%",
+        role=UserRole.CIUDADANO,
+    )
+    manager = _create_user(
+        db_session,
+        email="cemzoo_staff@example.com",
+        full_name="Gestor Zoonosis",
+        role=UserRole.GESTOR_CEMZOO,
+    )
+    admin = _create_user(
+        db_session,
+        email="super.admin@example.com",
+        full_name="Super Admin",
+        role=UserRole.ADMIN,
+    )
+
+    for non_admin in (citizen, manager):
+        denied = api_client.get("/api/v1/auth/users", headers=_auth_header(non_admin))
+        assert denied.status_code == 403
+
+    all_users = api_client.get("/api/v1/auth/users", headers=_auth_header(admin))
+    assert all_users.status_code == 200
+    all_emails = [item["email"] for item in all_users.json()]
+    assert set(all_emails) == {
+        "maria.lopez@example.com",
+        "cemzoo_staff@example.com",
+        "super.admin@example.com",
+    }
+    assert all("password_hash" not in item for item in all_users.json())
+
+    by_role = api_client.get(
+        "/api/v1/auth/users",
+        headers=_auth_header(admin),
+        params={"role": "gestor_cemzoo"},
+    )
+    assert by_role.status_code == 200
+    assert [item["email"] for item in by_role.json()] == ["cemzoo_staff@example.com"]
+
+    by_name_ci = api_client.get(
+        "/api/v1/auth/users",
+        headers=_auth_header(admin),
+        params={"search": "  maría  "},
+    )
+    assert by_name_ci.status_code == 200
+    assert [item["email"] for item in by_name_ci.json()] == ["maria.lopez@example.com"]
+
+    wildcard_escaped = api_client.get(
+        "/api/v1/auth/users",
+        headers=_auth_header(admin),
+        params={"search": "100%"},
+    )
+    assert wildcard_escaped.status_code == 200
+    assert [item["email"] for item in wildcard_escaped.json()] == ["maria.lopez@example.com"]
+
+    underscore_escaped = api_client.get(
+        "/api/v1/auth/users",
+        headers=_auth_header(admin),
+        params={"search": "cemzoo_staff"},
+    )
+    assert underscore_escaped.status_code == 200
+    assert [item["email"] for item in underscore_escaped.json()] == ["cemzoo_staff@example.com"]
+
+    paginated = api_client.get(
+        "/api/v1/auth/users",
+        headers=_auth_header(admin),
+        params={"limit": 1, "offset": 1},
+    )
+    assert paginated.status_code == 200
+    assert len(paginated.json()) == 1
+
+    assert (
+        api_client.get(
+            "/api/v1/auth/users",
+            headers=_auth_header(admin),
+            params={"limit": 0},
+        ).status_code
+        == 422
+    )
+    assert (
+        api_client.get(
+            "/api/v1/auth/users",
+            headers=_auth_header(admin),
+            params={"offset": -1},
+        ).status_code
+        == 422
+    )
+
+    @sa.event.listens_for(db_session.bind, "before_cursor_execute")
+    def reject_nul_in_search(
+        _conn: object,
+        _cursor: object,
+        _statement: str,
+        parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        values = parameters.values() if isinstance(parameters, dict) else parameters
+        if any(isinstance(val, str) and "\x00" in val for val in values):
+            raise AssertionError("NUL byte reached SQL query execution")
+
+    nul_search = api_client.get(
+        "/api/v1/auth/users",
+        headers=_auth_header(admin),
+        params={"search": "evil\x00query"},
+    )
+    assert nul_search.status_code == 422
