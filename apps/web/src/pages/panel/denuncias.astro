@@ -1,0 +1,11 @@
+---
+import AdminComplaintsTrayIsland from "../../islands/AdminComplaintsTrayIsland";
+import PanelLayout from "../../layouts/PanelLayout.astro";
+---
+
+<PanelLayout
+  title="Bandeja de Denuncias"
+  description="Bandeja institucional de denuncias ciudadanas para CEMZOO y administradores de SOS Animal."
+>
+  <AdminComplaintsTrayIsland client:only="react" />
+</PanelLayout>

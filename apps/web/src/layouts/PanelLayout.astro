@@ -1,0 +1,114 @@
+---
+import BaseHead from "../components/layout/BaseHead.astro";
+import PanelHeaderIsland from "../islands/PanelHeaderIsland";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  requireAdmin?: boolean;
+}
+
+const {
+  title,
+  description = "Panel institucional de gestión de denuncias y administración de SOS Animal (Sucre, Bolivia).",
+  requireAdmin = false,
+} = Astro.props;
+
+const currentPath = Astro.url.pathname;
+---
+
+<!DOCTYPE html>
+<html lang="es">
+  <BaseHead title={title} description={description}>
+    <script is:inline define:vars={{ requireAdmin }}>
+      (() => {
+        try {
+          const keys = ["sos_animal_access_token", "sos_animal_token", "access_token"];
+          let activePayload = null;
+          for (const key of keys) {
+            const raw = window.localStorage.getItem(key);
+            if (!raw || !raw.trim()) continue;
+            const parts = raw.trim().split(".");
+            if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) continue;
+            try {
+              const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+              const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+              const parsed = JSON.parse(window.atob(padded));
+              if (
+                parsed &&
+                typeof parsed.sub === "string" &&
+                parsed.sub.trim() &&
+                typeof parsed.exp === "number" &&
+                Number.isFinite(parsed.exp) &&
+                parsed.exp * 1000 > Date.now()
+              ) {
+                activePayload = parsed;
+                break;
+              }
+            } catch {
+              continue;
+            }
+          }
+          const nextUrl = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+          if (!activePayload) {
+            window.location.replace(nextUrl);
+            return;
+          }
+          if (
+            activePayload.role === "ciudadano" ||
+            (activePayload.role !== "gestor_cemzoo" && activePayload.role !== "admin")
+          ) {
+            window.location.replace("/");
+            return;
+          }
+          if (requireAdmin && activePayload.role !== "admin") {
+            window.location.replace("/panel/denuncias");
+          }
+        } catch {
+          window.location.replace("/login");
+        }
+      })();
+    </script>
+  </BaseHead>
+  <body class="min-h-dvh bg-bg-canvas text-text-primary antialiased">
+    <a href="#main-content" class="skip-link visually-hidden">
+      Saltar al contenido principal
+    </a>
+
+    <div class="flex min-h-dvh flex-col lg:grid lg:grid-cols-[17.5rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr]">
+      <PanelHeaderIsland client:only="react" currentPath={currentPath} requireAdmin={requireAdmin} />
+
+      <main id="main-content" class="min-w-0 flex-1 lg:col-start-2 lg:row-start-2">
+        <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <slot />
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const skipLink = document.querySelector<HTMLAnchorElement>(".skip-link");
+      skipLink?.addEventListener("click", (event) => {
+        const heading = document.querySelector<HTMLElement>("#main-content h1");
+        const fallback = document.getElementById("main-content");
+        const target = heading ?? fallback;
+        if (!target) {
+          return;
+        }
+        event.preventDefault();
+        if (!target.hasAttribute("tabindex")) {
+          target.setAttribute("tabindex", "-1");
+          target.addEventListener(
+            "blur",
+            () => {
+              target.removeAttribute("tabindex");
+            },
+            { once: true },
+          );
+        }
+        target.scrollIntoView({ block: "start" });
+        target.focus({ preventScroll: true });
+      });
+    </script>
+  </body>
+</html>

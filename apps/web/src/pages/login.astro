@@ -1,0 +1,11 @@
+---
+import AuthLoginIsland from "../islands/AuthLoginIsland";
+import MainLayout from "../layouts/MainLayout.astro";
+---
+
+<MainLayout
+  title="Iniciar sesión"
+  description="Ingresa a tu cuenta de SOS Animal para iniciar o retomar tu denuncia y gestionar casos."
+>
+  <AuthLoginIsland client:only="react" />
+</MainLayout>

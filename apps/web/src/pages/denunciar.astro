@@ -1,0 +1,51 @@
+---
+import ComplaintWizardIsland from "../islands/ComplaintWizardIsland";
+import MainLayout from "../layouts/MainLayout.astro";
+---
+
+<MainLayout
+  title="Denunciar Maltrato o Biocidio"
+  description="Asistente guiado en 7 pasos para presentar una denuncia formal por maltrato animal o biocidio en Sucre, Bolivia."
+>
+  <Fragment slot="head">
+    <script is:inline>
+      (() => {
+        try {
+          const keys = ["sos_animal_access_token", "sos_animal_token", "access_token"];
+          let hasValidToken = false;
+          for (const key of keys) {
+            const raw = window.localStorage.getItem(key);
+            if (!raw || !raw.trim()) continue;
+            const parts = raw.trim().split(".");
+            if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) continue;
+            try {
+              const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+              const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+              const parsed = JSON.parse(window.atob(padded));
+              if (
+                parsed &&
+                typeof parsed.sub === "string" &&
+                parsed.sub.trim() &&
+                typeof parsed.exp === "number" &&
+                Number.isFinite(parsed.exp) &&
+                parsed.exp * 1000 > Date.now()
+              ) {
+                hasValidToken = true;
+                break;
+              }
+            } catch {
+              continue;
+            }
+          }
+          if (!hasValidToken) {
+            const nextPath = window.location.pathname + window.location.search;
+            window.location.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+          }
+        } catch {
+          window.location.replace("/login?next=%2Fdenunciar");
+        }
+      })();
+    </script>
+  </Fragment>
+  <ComplaintWizardIsland client:only="react" />
+</MainLayout>

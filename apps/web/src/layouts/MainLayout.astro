@@ -29,12 +29,12 @@ const currentPath = Astro.url.pathname;
       Saltar al contenido principal
     </a>
 
-    <MobileHeader />
+    <MobileHeader currentPath={currentPath} />
     <DesktopNavbar currentPath={currentPath} />
 
     <main
       id="main-content"
-      class="flex-1 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pt-0 lg:pb-12"
+      class="flex-1 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pb-12"
     >
       <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <slot />

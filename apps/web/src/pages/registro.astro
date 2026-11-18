@@ -1,0 +1,11 @@
+---
+import AuthRegisterIsland from "../islands/AuthRegisterIsland";
+import MainLayout from "../layouts/MainLayout.astro";
+---
+
+<MainLayout
+  title="Crear cuenta"
+  description="Regístrate de forma rápida en SOS Animal para preparar denuncias de maltrato o biocidio en Sucre."
+>
+  <AuthRegisterIsland client:only="react" />
+</MainLayout>

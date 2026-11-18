@@ -1,0 +1,64 @@
+---
+import BaseHead from "../../components/layout/BaseHead.astro";
+import "../../styles/global.css";
+---
+
+<!DOCTYPE html>
+<html lang="es">
+  <BaseHead
+    title="Redirigiendo al Panel"
+    description="Redirección institucional del panel de SOS Animal."
+  >
+    <script is:inline>
+      (() => {
+        try {
+          const keys = ["sos_animal_access_token", "sos_animal_token", "access_token"];
+          let activePayload = null;
+          for (const key of keys) {
+            const raw = window.localStorage.getItem(key);
+            if (!raw || !raw.trim()) continue;
+            const parts = raw.trim().split(".");
+            if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) continue;
+            try {
+              const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+              const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+              const parsed = JSON.parse(window.atob(padded));
+              if (
+                parsed &&
+                typeof parsed.sub === "string" &&
+                parsed.sub.trim() &&
+                typeof parsed.exp === "number" &&
+                Number.isFinite(parsed.exp) &&
+                parsed.exp * 1000 > Date.now()
+              ) {
+                activePayload = parsed;
+                break;
+              }
+            } catch {
+              continue;
+            }
+          }
+          if (!activePayload) {
+            window.location.replace("/login?next=%2Fpanel%2Fdenuncias");
+            return;
+          }
+          if (activePayload.role === "gestor_cemzoo" || activePayload.role === "admin") {
+            window.location.replace("/panel/denuncias");
+          } else {
+            window.location.replace("/");
+          }
+        } catch {
+          window.location.replace("/");
+        }
+      })();
+    </script>
+  </BaseHead>
+  <body class="flex min-h-dvh items-center justify-center bg-bg-canvas p-6 text-text-primary">
+    <p class="text-sm font-medium text-text-secondary">
+      Redirigiendo al Panel Institucional...{" "}
+      <a href="/panel/denuncias" class="font-semibold text-primary underline">
+        Continuar
+      </a>
+    </p>
+  </body>
+</html>

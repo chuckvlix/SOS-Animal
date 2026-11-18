@@ -1,11 +1,21 @@
 ---
+import SessionComplaintsLink from "../../islands/SessionComplaintsLink";
 import BrandLockup from "../brand/BrandLockup.astro";
 import JurisdictionBadge from "../ui/JurisdictionBadge.astro";
+
+interface Props {
+  currentPath?: string;
+}
+
+const { currentPath = Astro.url.pathname } = Astro.props;
 ---
 
 <header
-  class="mobile-header-safe fixed inset-x-0 top-0 z-30 flex min-h-14 items-center justify-between border-b border-border bg-bg-surface lg:hidden"
+  class="mobile-header-safe sticky top-0 z-30 flex min-h-14 flex-wrap items-center justify-between gap-2 border-b border-border bg-bg-surface/95 backdrop-blur-sm lg:hidden"
 >
-  <BrandLockup size="sm" />
-  <JurisdictionBadge size="sm" />
+  <BrandLockup size="sm" class="shrink-0" />
+  <div class="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+    <JurisdictionBadge size="sm" class="hidden sm:inline-flex" />
+    <SessionComplaintsLink client:load currentPath={currentPath} variant="compact" />
+  </div>
 </header>

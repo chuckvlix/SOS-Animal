@@ -1,4 +1,5 @@
 import type { HealthResponse } from "../types";
+import { clearStoredAccessToken, getStoredAccessToken } from "./auth";
 
 export class ApiError extends Error {
   public readonly status: number;
@@ -50,16 +51,35 @@ export async function apiRequest<T>(
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
   const headers = new Headers(options.headers);
+  if (!headers.has("Authorization")) {
+    const token = getStoredAccessToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
   if (!headers.has("Content-Type") && options.body && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${baseUrl}${normalizedPath}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${normalizedPath}`, {
+      ...options,
+      headers,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    throw new Error(
+      "No se pudo conectar con el servidor. Verifica tu conexión o que la API esté activa.",
+    );
+  }
 
   if (!response.ok) {
+    if (response.status === 401 && headers.has("Authorization")) {
+      clearStoredAccessToken();
+    }
     let errorDetail = `HTTP ${response.status}`;
     try {
       const errorBody: unknown = await response.json();

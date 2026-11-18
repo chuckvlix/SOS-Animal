@@ -1,0 +1,12 @@
+---
+import AdminUsersIsland from "../../islands/AdminUsersIsland";
+import PanelLayout from "../../layouts/PanelLayout.astro";
+---
+
+<PanelLayout
+  title="Gestión de Usuarios"
+  description="Administración exclusiva de superusuario para asignar roles a cuentas registradas en SOS Animal."
+  requireAdmin
+>
+  <AdminUsersIsland client:only="react" />
+</PanelLayout>
