@@ -100,6 +100,49 @@ def update_user_profile(
     return user
 
 
+def list_users(
+    *,
+    session: Session,
+    role_filter: UserRole | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[User]:
+    """Return a paginated list of registered users for administrator role management."""
+    statement = select(User)
+    if role_filter is not None:
+        statement = statement.where(User.role == role_filter)
+
+    if search is not None:
+        cleaned_search = search.strip()
+        if cleaned_search:
+            if has_disallowed_control_chars(cleaned_search):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="search contains disallowed control or invisible characters.",
+                )
+            escaped = (
+                cleaned_search.lower()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            statement = statement.where(
+                sa.or_(
+                    sa.func.lower(User.full_name).like(pattern, escape="\\"),
+                    sa.func.lower(User.email).like(pattern, escape="\\"),
+                )
+            )
+
+    statement = (
+        statement.order_by(sa.desc(User.created_at), sa.asc(User.email))  # type: ignore[arg-type]
+        .offset(offset)
+        .limit(limit)
+    )
+    return list(session.exec(statement).all())
+
+
 def update_user_role(
     *,
     session: Session,

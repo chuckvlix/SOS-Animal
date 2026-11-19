@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.database import SessionDep
@@ -60,6 +60,25 @@ def update_my_profile(
 ) -> User:
     """Complete or update progressive profile fields required for formal complaints."""
     return service.update_user_profile(session=session, user=current_user, payload=payload)
+
+
+@router.get("/users", response_model=list[UserRead])
+def list_registered_users(
+    _admin_user: AdminUser,
+    session: SessionDep,
+    role: UserRole | None = None,
+    search: Annotated[str | None, Query(max_length=150)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[User]:
+    """List registered accounts for superuser role management (administrator only)."""
+    return service.list_users(
+        session=session,
+        role_filter=role,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.patch("/users/{user_id}/role", response_model=UserRead)

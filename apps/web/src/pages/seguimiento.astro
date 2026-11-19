@@ -1,0 +1,11 @@
+---
+import PublicTrackingIsland from "../islands/PublicTrackingIsland";
+import MainLayout from "../layouts/MainLayout.astro";
+---
+
+<MainLayout
+  title="Seguimiento de Denuncia"
+  description="Consulta públicamente el estado de tu denuncia de maltrato animal o biocidio mediante el código SOS-XXXXXX-2026."
+>
+  <PublicTrackingIsland client:only="react" />
+</MainLayout>
