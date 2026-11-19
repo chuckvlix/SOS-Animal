@@ -82,13 +82,18 @@ export default function SessionComplaintsLink({
   const panelLabel = role === "admin" ? "Panel Admin" : "Panel CEMZOO";
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div
+      className={[
+        "flex items-center",
+        isCompact ? "flex-wrap justify-end gap-1 sm:gap-1.5" : "gap-1.5",
+      ].join(" ")}
+    >
       <a
         href={AUTH_COMPLAINTS_NAV_ITEM.href}
         aria-current={complaintsActive ? "page" : undefined}
         className={[
-          "inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border font-semibold no-underline transition-colors",
-          isCompact ? "px-2.5 py-1.5 text-xs" : "px-2.5 py-2 text-xs xl:px-3 xl:text-sm",
+          "inline-flex min-h-[40px] items-center gap-1 whitespace-nowrap rounded-lg border font-semibold no-underline transition-colors sm:gap-1.5",
+          isCompact ? "px-2 py-1.5 text-xs sm:px-2.5" : "px-2.5 py-2 text-xs xl:px-3 xl:text-sm",
           complaintsActive
             ? "border-primary bg-primary-soft text-primary"
             : "border-border bg-bg-surface text-text-primary hover:bg-bg-canvas",
@@ -110,8 +115,8 @@ export default function SessionComplaintsLink({
           href="/panel/denuncias"
           aria-current={panelActive ? "page" : undefined}
           className={[
-            "inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border font-semibold no-underline transition-colors",
-            isCompact ? "px-2.5 py-1.5 text-xs" : "px-2.5 py-2 text-xs xl:px-3 xl:text-sm",
+            "inline-flex min-h-[40px] items-center gap-1 whitespace-nowrap rounded-lg border font-semibold no-underline transition-colors sm:gap-1.5",
+            isCompact ? "px-2 py-1.5 text-xs sm:px-2.5" : "px-2.5 py-2 text-xs xl:px-3 xl:text-sm",
             panelActive
               ? "border-secondary bg-secondary-soft text-secondary-text"
               : "border-secondary/30 bg-secondary-soft/60 text-secondary-text hover:bg-secondary-soft",
@@ -126,13 +131,21 @@ export default function SessionComplaintsLink({
       <button
         type="button"
         onClick={handleLogout}
+        aria-label="Cerrar sesión"
         className={[
-          "inline-flex min-h-[40px] cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-bg-surface font-semibold text-text-secondary transition-colors hover:border-sos/30 hover:bg-sos-soft hover:text-sos-text",
-          isCompact ? "px-2.5 py-1.5 text-xs" : "px-3 py-2 text-xs xl:text-sm",
+          "inline-flex min-h-[40px] cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg border border-border bg-bg-surface font-semibold text-text-secondary transition-colors hover:border-sos/30 hover:bg-sos-soft hover:text-sos-text sm:gap-1.5",
+          isCompact ? "px-2 py-1.5 text-xs sm:px-2.5" : "px-3 py-2 text-xs xl:text-sm",
         ].join(" ")}
       >
         <LogOut aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-        <span>Cerrar sesión</span>
+        {isCompact ? (
+          <>
+            <span className="sm:hidden">Salir</span>
+            <span className="hidden sm:inline">Cerrar sesión</span>
+          </>
+        ) : (
+          <span>Cerrar sesión</span>
+        )}
       </button>
     </div>
   );

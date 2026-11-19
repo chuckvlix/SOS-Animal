@@ -36,6 +36,8 @@ function redirectToLogin(): void {
 
 export default function AdminUsersIsland() {
   const [authorizedAdmin, setAuthorizedAdmin] = useState<UserRead | null>(null);
+  const [verifyingSession, setVerifyingSession] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -53,6 +55,7 @@ export default function AdminUsersIsland() {
   const [updatingRole, setUpdatingRole] = useState(false);
 
   const confirmRoleDialogRef = useRef<HTMLDialogElement>(null);
+  const cancelRoleButtonRef = useRef<HTMLButtonElement>(null);
 
   const loadUsers = useCallback(async (searchTerm: string, roleVal: RoleFilter, page = 0) => {
     setLoading(true);
@@ -93,43 +96,75 @@ export default function AdminUsersIsland() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!isUserAuthenticated()) {
-      redirectToLogin();
-      return;
-    }
-
-    let cancelled = false;
-    fetchCurrentUser()
-      .then((me) => {
-        if (cancelled) {
-          return;
-        }
-        if (me.role === "ciudadano") {
-          window.location.replace("/");
-          return;
-        }
-        if (me.role !== "admin") {
-          window.location.replace("/panel/denuncias");
-          return;
-        }
-        setAuthorizedAdmin(me);
-        void loadUsers("", "", 0);
-      })
-      .catch((err) => {
-        if (cancelled) {
-          return;
-        }
-        if (err instanceof ApiError && err.status === 401) {
-          clearStoredAccessToken();
-        }
+  const verifyAndInitialize = useCallback(
+    (isCancelled?: () => boolean) => {
+      if (!isUserAuthenticated()) {
         redirectToLogin();
-      });
+        return;
+      }
 
+      setVerifyingSession(true);
+      setSessionError(null);
+
+      fetchCurrentUser()
+        .then((me) => {
+          if (isCancelled?.()) {
+            return;
+          }
+          if (me.role === "ciudadano") {
+            window.location.replace("/");
+            return;
+          }
+          if (me.role !== "admin") {
+            window.location.replace("/panel/denuncias");
+            return;
+          }
+          setAuthorizedAdmin(me);
+          setVerifyingSession(false);
+          void loadUsers("", "", 0);
+        })
+        .catch((err) => {
+          if (isCancelled?.()) {
+            return;
+          }
+          if (err instanceof ApiError && err.status === 401) {
+            clearStoredAccessToken();
+            redirectToLogin();
+            return;
+          }
+          if (err instanceof ApiError && err.status === 403) {
+            window.location.replace("/panel/denuncias");
+            return;
+          }
+          setSessionError(
+            err instanceof Error && err.message
+              ? err.message
+              : "No pudimos verificar tus permisos de superusuario con el servidor.",
+          );
+          setVerifyingSession(false);
+        });
+    },
+    [loadUsers],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    verifyAndInitialize(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [loadUsers]);
+  }, [verifyAndInitialize]);
+
+  useEffect(() => {
+    const dialog = confirmRoleDialogRef.current;
+    if (!pendingChange || !dialog) {
+      return;
+    }
+    if (!dialog.open) {
+      dialog.showModal();
+      cancelRoleButtonRef.current?.focus();
+    }
+  }, [pendingChange]);
 
   const handleFilterSubmit = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -155,7 +190,6 @@ export default function AdminUsersIsland() {
     }
     setErrorMessage(null);
     setPendingChange({ user: targetUser, targetRole: nextRole });
-    confirmRoleDialogRef.current?.showModal();
   };
 
   const closeRoleDialog = () => {
@@ -206,6 +240,25 @@ export default function AdminUsersIsland() {
   };
 
   if (!authorizedAdmin) {
+    if (sessionError && !verifyingSession) {
+      return (
+        <div role="alert" className="rounded-3xl border border-sos/30 bg-sos-soft p-6 shadow-xs">
+          <h1 className="m-0 font-display text-lg font-bold text-sos-text">
+            No pudimos validar tus permisos de administrador
+          </h1>
+          <p className="mt-2 mb-4 text-sm text-text-primary">{sessionError}</p>
+          <button
+            type="button"
+            onClick={() => verifyAndInitialize()}
+            className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
+          >
+            <RefreshCw aria-hidden="true" className="h-4 w-4" />
+            <span>Reintentar verificación</span>
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="rounded-3xl border border-border bg-bg-surface p-8 text-center shadow-xs">
         <p className="m-0 text-sm font-medium text-text-secondary">
@@ -525,6 +578,7 @@ export default function AdminUsersIsland() {
 
         <div className="mt-6 flex flex-wrap justify-end gap-2.5">
           <button
+            ref={cancelRoleButtonRef}
             type="button"
             autoFocus
             disabled={updatingRole}

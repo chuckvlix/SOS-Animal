@@ -43,11 +43,13 @@ export default function AuthLoginIsland() {
         }
         window.location.replace(resolvePostAuthDestination(user.role, nextParam));
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) {
           return;
         }
-        clearStoredAccessToken();
+        if (err instanceof ApiError && err.status === 401) {
+          clearStoredAccessToken();
+        }
         setCheckingSession(false);
       });
 

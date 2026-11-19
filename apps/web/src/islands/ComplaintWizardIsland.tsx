@@ -294,6 +294,13 @@ export default function ComplaintWizardIsland() {
     setStep(nextStep);
   };
 
+  const focusStepError = () => {
+    window.requestAnimationFrame(() => {
+      stepErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      stepErrorRef.current?.focus({ preventScroll: true });
+    });
+  };
+
   const validateSingleStep5Field = (field: Step5FieldKey, rawValue: string): string | undefined => {
     switch (field) {
       case "fullName": {
@@ -470,7 +477,7 @@ export default function ComplaintWizardIsland() {
       if (firstInvalidField) {
         focusStep5Field(firstInvalidField);
       } else {
-        stepErrorRef.current?.focus();
+        focusStepError();
       }
       return null;
     }
@@ -540,6 +547,7 @@ export default function ComplaintWizardIsland() {
             ? err.message
             : "No se pudo guardar el borrador de la denuncia.",
         );
+        focusStepError();
         return null;
       } finally {
         setSavingDraft(false);
@@ -582,6 +590,7 @@ export default function ComplaintWizardIsland() {
           ? err.message
           : "No pudimos generar la vista previa del Documento de Denuncia.",
       );
+      focusStepError();
     } finally {
       setLoadingPreview(false);
     }
@@ -607,6 +616,7 @@ export default function ComplaintWizardIsland() {
           ? err.message
           : "No pudimos recargar la vista previa.",
       );
+      focusStepError();
     } finally {
       setLoadingPreview(false);
     }
@@ -736,6 +746,7 @@ export default function ComplaintWizardIsland() {
           ? err.message
           : "No se pudo eliminar la evidencia.",
       );
+      focusStepError();
     } finally {
       setRemovingEvidenceId(null);
     }
@@ -779,6 +790,7 @@ export default function ComplaintWizardIsland() {
           ? err.message
           : "No pudimos confirmar el envío definitivo de la denuncia.",
       );
+      focusStepError();
     } finally {
       setSubmittingFinal(false);
     }
@@ -801,6 +813,7 @@ export default function ComplaintWizardIsland() {
           ? err.message
           : "No pudimos generar el enlace de descarga del PDF.",
       );
+      focusStepError();
     } finally {
       setDownloadingPdf(false);
     }
@@ -1093,6 +1106,7 @@ export default function ComplaintWizardIsland() {
                   onClick={() => {
                     if (!confirmedStart) {
                       setStepError("Marca la confirmación para continuar con la denuncia.");
+                      focusStepError();
                       return;
                     }
                     goToStep(2);
@@ -1192,6 +1206,7 @@ export default function ComplaintWizardIsland() {
                   onClick={() => {
                     if (!selectedMainType) {
                       setStepError("Selecciona Maltrato animal o Biocidio para continuar.");
+                      focusStepError();
                       return;
                     }
                     goToStep(3);
@@ -1275,6 +1290,7 @@ export default function ComplaintWizardIsland() {
                   onClick={() => {
                     if (!selectedCategoryId) {
                       setStepError("Elige una modalidad específica del catálogo para continuar.");
+                      focusStepError();
                       return;
                     }
                     goToStep(4);

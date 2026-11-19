@@ -42,6 +42,8 @@ function redirectToLogin(): void {
 
 export default function AdminComplaintsTrayIsland() {
   const [authorized, setAuthorized] = useState(false);
+  const [verifyingSession, setVerifyingSession] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export default function AdminComplaintsTrayIsland() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
   const detailDialogRef = useRef<HTMLDialogElement>(null);
+  const detailCloseButtonRef = useRef<HTMLButtonElement>(null);
 
   const loadComplaints = useCallback(
     async (nextStatus: StatusFilter, nextMainType: MainTypeFilter, page = 0) => {
@@ -98,39 +101,71 @@ export default function AdminComplaintsTrayIsland() {
     [],
   );
 
-  useEffect(() => {
-    if (!isUserAuthenticated()) {
-      redirectToLogin();
-      return;
-    }
-
-    let cancelled = false;
-    fetchCurrentUser()
-      .then((me) => {
-        if (cancelled) {
-          return;
-        }
-        if (me.role === "ciudadano") {
-          window.location.replace("/");
-          return;
-        }
-        setAuthorized(true);
-        void loadComplaints("", "", 0);
-      })
-      .catch((err) => {
-        if (cancelled) {
-          return;
-        }
-        if (err instanceof ApiError && err.status === 401) {
-          clearStoredAccessToken();
-        }
+  const verifyAndInitialize = useCallback(
+    (isCancelled?: () => boolean) => {
+      if (!isUserAuthenticated()) {
         redirectToLogin();
-      });
+        return;
+      }
 
+      setVerifyingSession(true);
+      setSessionError(null);
+
+      fetchCurrentUser()
+        .then((me) => {
+          if (isCancelled?.()) {
+            return;
+          }
+          if (me.role === "ciudadano") {
+            window.location.replace("/");
+            return;
+          }
+          setAuthorized(true);
+          setVerifyingSession(false);
+          void loadComplaints("", "", 0);
+        })
+        .catch((err) => {
+          if (isCancelled?.()) {
+            return;
+          }
+          if (err instanceof ApiError && err.status === 401) {
+            clearStoredAccessToken();
+            redirectToLogin();
+            return;
+          }
+          if (err instanceof ApiError && err.status === 403) {
+            window.location.replace("/");
+            return;
+          }
+          setSessionError(
+            err instanceof Error && err.message
+              ? err.message
+              : "No pudimos verificar tu sesión institucional con el servidor.",
+          );
+          setVerifyingSession(false);
+        });
+    },
+    [loadComplaints],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    verifyAndInitialize(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [loadComplaints]);
+  }, [verifyAndInitialize]);
+
+  useEffect(() => {
+    const dialog = detailDialogRef.current;
+    if (!selectedComplaint || !dialog) {
+      return;
+    }
+    if (!dialog.open) {
+      dialog.showModal();
+      detailCloseButtonRef.current?.focus();
+    }
+  }, [selectedComplaint]);
 
   const metrics = useMemo(() => {
     const counts: Record<"ENVIADA" | "EN_ATENCION_CEMZOO" | "CERRADA", number> = {
@@ -168,7 +203,6 @@ export default function AdminComplaintsTrayIsland() {
     setModalError(null);
     setModalNotice(null);
     setSelectedComplaint(complaint);
-    detailDialogRef.current?.showModal();
   };
 
   const closeDetailModal = () => {
@@ -249,6 +283,25 @@ export default function AdminComplaintsTrayIsland() {
   };
 
   if (!authorized) {
+    if (sessionError && !verifyingSession) {
+      return (
+        <div role="alert" className="rounded-3xl border border-sos/30 bg-sos-soft p-6 shadow-xs">
+          <h1 className="m-0 font-display text-lg font-bold text-sos-text">
+            No pudimos validar el acceso a la bandeja
+          </h1>
+          <p className="mt-2 mb-4 text-sm text-text-primary">{sessionError}</p>
+          <button
+            type="button"
+            onClick={() => verifyAndInitialize()}
+            className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
+          >
+            <RefreshCw aria-hidden="true" className="h-4 w-4" />
+            <span>Reintentar verificación</span>
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="rounded-3xl border border-border bg-bg-surface p-8 text-center shadow-xs">
         <p className="m-0 text-sm font-medium text-text-secondary">
@@ -288,30 +341,36 @@ export default function AdminComplaintsTrayIsland() {
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-border bg-bg-canvas p-4">
-            <p className="m-0 text-xs font-medium text-text-secondary">Total en vista</p>
+            <p className="m-0 text-xs font-medium text-text-secondary">En página actual</p>
             <p className="tabular-nums mt-1 mb-0 font-display text-2xl font-bold text-text-primary">
               {complaints.length}
             </p>
           </div>
           <div className="rounded-2xl border border-primary/20 bg-primary-soft/50 p-4">
-            <p className="m-0 text-xs font-medium text-primary">Recibidas (Enviada)</p>
+            <p className="m-0 text-xs font-medium text-primary">Recibidas (en página)</p>
             <p className="tabular-nums mt-1 mb-0 font-display text-2xl font-bold text-primary">
               {metrics.ENVIADA}
             </p>
           </div>
           <div className="rounded-2xl border border-secondary/25 bg-secondary-soft/60 p-4">
-            <p className="m-0 text-xs font-medium text-secondary-text">En atención CEMZOO</p>
+            <p className="m-0 text-xs font-medium text-secondary-text">En atención (en página)</p>
             <p className="tabular-nums mt-1 mb-0 font-display text-2xl font-bold text-secondary-text">
               {metrics.EN_ATENCION_CEMZOO}
             </p>
           </div>
           <div className="rounded-2xl border border-border bg-slate-100 p-4">
-            <p className="m-0 text-xs font-medium text-text-secondary">Cerradas</p>
+            <p className="m-0 text-xs font-medium text-text-secondary">Cerradas (en página)</p>
             <p className="tabular-nums mt-1 mb-0 font-display text-2xl font-bold text-text-primary">
               {metrics.CERRADA}
             </p>
           </div>
         </div>
+        {(pageIndex > 0 || hasNextPage) && (
+          <p className="mt-2.5 mb-0 text-xs text-text-secondary">
+            Los contadores reflejan los expedientes visibles en la página {pageIndex + 1} (hasta{" "}
+            {PAGE_SIZE} por página).
+          </p>
+        )}
 
         <search className="mt-6 border-t border-border pt-5">
           <form onSubmit={handleFilterSubmit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
@@ -586,6 +645,7 @@ export default function AdminComplaintsTrayIsland() {
               </div>
 
               <button
+                ref={detailCloseButtonRef}
                 type="button"
                 autoFocus
                 disabled={updatingStatus}

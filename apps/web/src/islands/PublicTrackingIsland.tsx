@@ -101,15 +101,15 @@ export default function PublicTrackingIsland() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border border-border bg-bg-surface p-6 shadow-xs sm:p-8">
-        <p className="m-0 inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-xs font-semibold text-primary">
-          <Search aria-hidden="true" className="h-3.5 w-3.5" />
+      <section className="rounded-3xl border border-border bg-bg-surface p-5 shadow-xs sm:p-8">
+        <p className="m-0 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-xs font-semibold text-primary">
+          <Search aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
           <span>Consulta pública sin inicio de sesión</span>
         </p>
-        <h1 className="mt-3 font-display text-2xl font-bold text-text-primary sm:text-3xl">
+        <h1 className="mt-2.5 font-display text-2xl font-bold text-text-primary sm:mt-3 sm:text-3xl">
           Seguimiento de Denuncia por Código SOS
         </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-text-secondary">
+        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-text-secondary sm:mt-2">
           Ingresa el código correlativo asignado al finalizar tu denuncia (por ejemplo{" "}
           <span className="tabular-nums font-semibold text-text-primary">SOS-000001-2026</span>)
           para consultar el estado de atención institucional.
@@ -119,7 +119,7 @@ export default function PublicTrackingIsland() {
           <form
             onSubmit={handleSubmit}
             noValidate
-            className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end"
+            className="mt-4 flex flex-col gap-3 sm:mt-5 sm:flex-row sm:items-end"
           >
             <div className="min-w-0 flex-1">
               <label

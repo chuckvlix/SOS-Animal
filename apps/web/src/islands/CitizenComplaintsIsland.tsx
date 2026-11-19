@@ -7,9 +7,10 @@ import {
   Lock,
   MapPin,
   PlusCircle,
+  RefreshCw,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../services/api";
 import {
   clearStoredAccessToken,
@@ -31,16 +32,21 @@ import type { ComplaintRead, UserRead } from "../types";
 
 type HistoryFilter = "ALL" | "DRAFTS" | "SUBMITTED";
 
+const PAGE_SIZE = 50;
+
 function redirectToLogin(): void {
   window.location.replace(`/login?next=${encodeURIComponent("/mis-denuncias")}`);
 }
 
 export default function CitizenComplaintsIsland() {
   const [loading, setLoading] = useState(true);
+  const [loadingPage, setLoadingPage] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [user, setUser] = useState<UserRead | null>(null);
   const [complaints, setComplaints] = useState<ComplaintRead[]>([]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
   const [filter, setFilter] = useState<HistoryFilter>("ALL");
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -48,28 +54,54 @@ export default function CitizenComplaintsIsland() {
   const [deletingDraft, setDeletingDraft] = useState(false);
 
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const cancelDeleteButtonRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  const loadComplaintsPage = useCallback(async (page = 0) => {
+    setLoadingPage(true);
+    setErrorMessage(null);
+    try {
+      const myList = await fetchMyComplaints(PAGE_SIZE + 1, page * PAGE_SIZE);
+      setHasNextPage(myList.length > PAGE_SIZE);
+      setComplaints(myList.slice(0, PAGE_SIZE));
+      setPageIndex(page);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearStoredAccessToken();
+        redirectToLogin();
+        return;
+      }
+      setErrorMessage(
+        err instanceof Error && err.message
+          ? err.message
+          : "No pudimos cargar tu historial de denuncias.",
+      );
+    } finally {
+      setLoadingPage(false);
+    }
+  }, []);
+
+  const loadInitialHistory = useCallback((isCancelled?: () => boolean) => {
     if (!isUserAuthenticated()) {
       redirectToLogin();
       return;
     }
 
-    let cancelled = false;
-    (async () => {
-      try {
-        const [me, myList] = await Promise.all([
-          fetchCurrentUser(),
-          fetchMyComplaints(100, 0),
-        ]);
-        if (cancelled) {
+    setLoading(true);
+    setErrorMessage(null);
+
+    Promise.all([fetchCurrentUser(), fetchMyComplaints(PAGE_SIZE + 1, 0)])
+      .then(([me, myList]) => {
+        if (isCancelled?.()) {
           return;
         }
         setUser(me);
-        setComplaints(myList);
+        setHasNextPage(myList.length > PAGE_SIZE);
+        setComplaints(myList.slice(0, PAGE_SIZE));
+        setPageIndex(0);
         setLoading(false);
-      } catch (err) {
-        if (cancelled) {
+      })
+      .catch((err) => {
+        if (isCancelled?.()) {
           return;
         }
         if (err instanceof ApiError && err.status === 401) {
@@ -83,13 +115,27 @@ export default function CitizenComplaintsIsland() {
             : "No pudimos cargar tu historial de denuncias.",
         );
         setLoading(false);
-      }
-    })();
+      });
+  }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadInitialHistory(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadInitialHistory]);
+
+  useEffect(() => {
+    const dialog = deleteDialogRef.current;
+    if (!draftToDelete || !dialog) {
+      return;
+    }
+    if (!dialog.open) {
+      dialog.showModal();
+      cancelDeleteButtonRef.current?.focus();
+    }
+  }, [draftToDelete]);
 
   const counts = useMemo(() => {
     const drafts = complaints.filter(
@@ -120,7 +166,6 @@ export default function CitizenComplaintsIsland() {
   const handleOpenDeleteDialog = (draft: ComplaintRead) => {
     setErrorMessage(null);
     setDraftToDelete(draft);
-    deleteDialogRef.current?.showModal();
   };
 
   const handleCloseDeleteDialog = () => {
@@ -139,9 +184,10 @@ export default function CitizenComplaintsIsland() {
     setErrorMessage(null);
     try {
       await deleteDraftComplaint(draftToDelete.id);
-      setComplaints((prev) => prev.filter((item) => item.id !== draftToDelete.id));
-      setStatusMessage("Borrador eliminado correctamente.");
+      const shouldStepBack = complaints.length === 1 && pageIndex > 0;
       handleCloseDeleteDialog();
+      setStatusMessage("Borrador eliminado correctamente.");
+      await loadComplaintsPage(shouldStepBack ? pageIndex - 1 : pageIndex);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearStoredAccessToken();
@@ -254,10 +300,21 @@ export default function CitizenComplaintsIsland() {
       {errorMessage && (
         <div
           role="alert"
-          className="flex items-start gap-2.5 rounded-2xl border border-sos/30 bg-sos-soft p-4 text-sm font-medium text-sos-text"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sos/30 bg-sos-soft p-4 text-sm font-medium text-sos-text"
         >
-          <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{errorMessage}</span>
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            type="button"
+            disabled={loadingPage}
+            onClick={() => (user ? void loadComplaintsPage(pageIndex) : loadInitialHistory())}
+            className="inline-flex min-h-[38px] shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-sos/30 bg-bg-surface px-3 py-1.5 text-xs font-semibold text-sos-text hover:bg-bg-canvas disabled:opacity-60"
+          >
+            <RefreshCw aria-hidden="true" className={`h-3.5 w-3.5 ${loadingPage ? "animate-spin" : ""}`} />
+            <span>Reintentar</span>
+          </button>
         </div>
       )}
 
@@ -411,6 +468,33 @@ export default function CitizenComplaintsIsland() {
         </ul>
       )}
 
+      {(pageIndex > 0 || hasNextPage) && !loading && (
+        <nav
+          aria-label="Paginación de mis denuncias"
+          className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-bg-surface px-4 py-3 text-xs font-semibold"
+        >
+          <span className="tabular-nums text-text-secondary">Página {pageIndex + 1}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={pageIndex === 0 || loadingPage}
+              onClick={() => void loadComplaintsPage(pageIndex - 1)}
+              className="inline-flex min-h-[38px] cursor-pointer items-center rounded-lg border border-border bg-bg-canvas px-3 py-1.5 text-text-primary hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              disabled={!hasNextPage || loadingPage}
+              onClick={() => void loadComplaintsPage(pageIndex + 1)}
+              className="inline-flex min-h-[38px] cursor-pointer items-center rounded-lg border border-border bg-bg-canvas px-3 py-1.5 text-text-primary hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Siguiente
+            </button>
+          </div>
+        </nav>
+      )}
+
       <dialog
         ref={deleteDialogRef}
         aria-labelledby="delete-draft-title"
@@ -442,6 +526,7 @@ export default function CitizenComplaintsIsland() {
 
         <div className="mt-6 flex flex-wrap justify-end gap-2.5">
           <button
+            ref={cancelDeleteButtonRef}
             type="button"
             autoFocus
             disabled={deletingDraft}

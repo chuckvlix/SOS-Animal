@@ -3,11 +3,12 @@ import {
   ClipboardList,
   LogOut,
   Menu,
+  RefreshCw,
   ShieldCheck,
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { isActiveRoute } from "../data/navigation";
 import { ApiError } from "../services/api";
 import {
@@ -186,49 +187,72 @@ export default function PanelHeaderIsland({
   requireAdmin = false,
 }: PanelHeaderIslandProps) {
   const [user, setUser] = useState<UserRead | null>(null);
+  const [verifying, setVerifying] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerId = useId();
   const drawerRef = useRef<HTMLDialogElement>(null);
   const drawerSheetRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const loginNext = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+  const verifySession = useCallback(
+    (isCancelled?: () => boolean) => {
+      const loginNext = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
 
-    if (!isUserAuthenticated()) {
-      window.location.replace(loginNext);
-      return;
-    }
-
-    let cancelled = false;
-    fetchCurrentUser()
-      .then((me) => {
-        if (cancelled) {
-          return;
-        }
-        if (me.role === "ciudadano") {
-          window.location.replace("/");
-          return;
-        }
-        if (requireAdmin && me.role !== "admin") {
-          window.location.replace("/panel/denuncias");
-          return;
-        }
-        setUser(me);
-      })
-      .catch((err) => {
-        if (cancelled) {
-          return;
-        }
-        if (err instanceof ApiError && err.status === 401) {
-          clearStoredAccessToken();
-        }
+      if (!isUserAuthenticated()) {
         window.location.replace(loginNext);
-      });
+        return;
+      }
 
+      setVerifying(true);
+      setSessionError(null);
+
+      fetchCurrentUser()
+        .then((me) => {
+          if (isCancelled?.()) {
+            return;
+          }
+          if (me.role === "ciudadano") {
+            window.location.replace("/");
+            return;
+          }
+          if (requireAdmin && me.role !== "admin") {
+            window.location.replace("/panel/denuncias");
+            return;
+          }
+          setUser(me);
+          setVerifying(false);
+        })
+        .catch((err) => {
+          if (isCancelled?.()) {
+            return;
+          }
+          if (err instanceof ApiError && err.status === 401) {
+            clearStoredAccessToken();
+            window.location.replace(loginNext);
+            return;
+          }
+          if (err instanceof ApiError && err.status === 403) {
+            window.location.replace("/");
+            return;
+          }
+          setSessionError(
+            err instanceof Error && err.message
+              ? err.message
+              : "No pudimos verificar la sesión institucional.",
+          );
+          setVerifying(false);
+        });
+    },
+    [requireAdmin],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    verifySession(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [requireAdmin]);
+  }, [verifySession]);
 
   const openDrawer = () => {
     const dialog = drawerRef.current;
@@ -260,15 +284,37 @@ export default function PanelHeaderIsland({
         <aside className="hidden border-r border-border bg-bg-surface lg:col-start-1 lg:row-span-2 lg:block lg:h-dvh lg:sticky lg:top-0">
           <div className="p-5">
             <span className="font-display text-sm font-semibold text-text-secondary">
-              Cargando menú...
+              {sessionError && !verifying ? "Conexión pendiente" : "Cargando menú..."}
             </span>
           </div>
         </aside>
         <header className="border-b border-border bg-bg-surface lg:col-start-2 lg:row-start-1">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-3.5 sm:px-6 lg:px-8">
             <span className="font-display text-sm font-semibold text-text-secondary">
-              Verificando acceso institucional...
+              {sessionError && !verifying
+                ? sessionError
+                : "Verificando acceso institucional..."}
             </span>
+            {sessionError && !verifying && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => verifySession()}
+                  className="inline-flex min-h-[38px] cursor-pointer items-center gap-1.5 rounded-xl bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-hover"
+                >
+                  <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+                  <span>Reintentar</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="inline-flex min-h-[38px] cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-bg-surface px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-sos/30 hover:bg-sos-soft hover:text-sos-text"
+                >
+                  <LogOut aria-hidden="true" className="h-3.5 w-3.5" />
+                  <span>Cerrar sesión</span>
+                </button>
+              </div>
+            )}
           </div>
         </header>
       </>

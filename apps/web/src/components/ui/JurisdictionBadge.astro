@@ -10,11 +10,15 @@ interface Props {
 const { label = JURISDICTION_LABEL, size = "sm", class: className } = Astro.props;
 
 const paddingClass = size === "md" ? "px-3 py-1 font-semibold" : "px-2.5 py-1 font-medium";
+const hasDisplayOverride = /\b(?:hidden|block|inline|inline-block|flex|inline-flex|grid)\b/.test(
+  className ?? "",
+);
 ---
 
 <span
   class:list={[
-    "inline-flex items-center rounded-full bg-primary-soft text-xs text-primary",
+    !hasDisplayOverride && "inline-flex",
+    "items-center rounded-full bg-primary-soft text-xs text-primary",
     paddingClass,
     className,
   ]}
