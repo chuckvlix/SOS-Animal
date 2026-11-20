@@ -98,7 +98,7 @@ export const FOOTER_LINK_GROUPS: readonly FooterLinkGroup[] = [
     title: "Denuncias y Marco Legal",
     links: [
       { label: "Denunciar Maltrato o Biocidio", href: "/denunciar" },
-      { label: "Seguimiento por Código", href: "/seguimiento" },
+      { label: "Mis Denuncias Emitidas", href: "/mis-denuncias" },
       { label: "Normativa Legal Vigente", href: "/normativa" },
     ],
   },

@@ -93,6 +93,45 @@
         font-size: 9pt;
         color: #475569;
       }
+
+      .photo-annex {
+        page-break-before: always;
+        break-before: page;
+        margin-top: 8px;
+      }
+
+      .annex-subtitle {
+        font-size: 10pt;
+        color: #475569;
+        margin: 0 0 14px 0;
+      }
+
+      .photo-card {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 10px;
+        margin: 0 0 14px 0;
+        background-color: #f8fafc;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      .photo-card img {
+        display: block;
+        max-width: 100%;
+        max-height: 215px;
+        width: auto;
+        height: auto;
+        margin: 0 auto;
+        border-radius: 4px;
+      }
+
+      .photo-caption {
+        margin-top: 8px;
+        font-size: 9pt;
+        color: #475569;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
@@ -100,7 +139,7 @@
       <div class="brand">SOS Animal — Sucre, Bolivia</div>
       <h1>DOCUMENTO DE DENUNCIA</h1>
       <div class="meta-row">
-        Código de seguimiento: <strong>{{ tracking_code }}</strong> · Fecha de emisión: {{ submitted_at }}
+        Código de referencia: <strong>{{ tracking_code }}</strong> · Fecha de emisión: {{ submitted_at }}
       </div>
     </header>
 
@@ -167,19 +206,42 @@
     </section>
 
     <section class="section">
-      <div class="section-title">V. Evidencias Adjuntas</div>
+      <div class="section-title">V. Anexo Fotográfico Adjunto</div>
+      {% if evidences %}
+      <p>
+        Se adjuntan <strong>{{ evidences|length }}</strong> fotografía(s) como respaldo visual en
+        el Anexo Fotográfico de la última página de este documento:
+      </p>
       <ul>
         {% for evidence in evidences %}
-        <li>{{ evidence.evidence_type }} — {{ evidence.object_key }} ({{ evidence.mime_type }})</li>
-        {% else %}
-        <li>Sin evidencias digitales adjuntas al momento del registro.</li>
+        <li>Fotografía {{ loop.index }} — {{ evidence.object_key }} ({{ evidence.mime_type }})</li>
         {% endfor %}
       </ul>
+      {% else %}
+      <p>Sin fotografías adjuntas al momento del registro.</p>
+      {% endif %}
     </section>
 
     <footer class="footer">
-      Documento de Denuncia generado automáticamente por la plataforma ciudadana SOS Animal (Sucre, Bolivia).
+      Documento de Denuncia generado por la plataforma ciudadana SOS Animal (Sucre, Bolivia).
       No constituye patrocinio de abogado ni sustituye la recepción formal de la autoridad competente.
     </footer>
+
+    {% if photo_annex %}
+    <section class="photo-annex">
+      <div class="section-title">VI. Anexo Fotográfico</div>
+      <p class="annex-subtitle">
+        Evidencias fotográficas integradas al Documento de Denuncia ({{ tracking_code }}).
+      </p>
+      {% for photo in photo_annex %}
+      <figure class="photo-card">
+        <img src="{{ photo.data_uri }}" alt="Fotografía {{ loop.index }} de {{ photo_annex|length }}" />
+        <figcaption class="photo-caption">
+          Fotografía {{ loop.index }} de {{ photo_annex|length }} · {{ photo.mime_type }}
+        </figcaption>
+      </figure>
+      {% endfor %}
+    </section>
+    {% endif %}
   </body>
 </html>

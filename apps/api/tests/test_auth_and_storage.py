@@ -288,24 +288,31 @@ def test_admin_role_assignment_rbac_and_self_demotion_guard(
 ) -> None:
     """Only admins can change roles, and admins cannot demote themselves."""
     citizen = _create_user(db_session, email="citizen1@example.com", role=UserRole.CIUDADANO)
-    manager = _create_user(db_session, email="manager1@example.com", role=UserRole.GESTOR_CEMZOO)
+    other_citizen = _create_user(db_session, email="citizen2@example.com", role=UserRole.CIUDADANO)
     admin = _create_user(db_session, email="admin1@example.com", role=UserRole.ADMIN)
 
-    for non_admin in (citizen, manager):
+    for non_admin in (citizen, other_citizen):
         forbidden = api_client.patch(
             f"/api/v1/auth/users/{citizen.id}/role",
             headers=_auth_header(non_admin),
-            json={"role": "gestor_cemzoo"},
+            json={"role": "admin"},
         )
         assert forbidden.status_code == 403
 
-    promoted = api_client.patch(
+    invalid_role = api_client.patch(
         f"/api/v1/auth/users/{citizen.id}/role",
         headers=_auth_header(admin),
         json={"role": "gestor_cemzoo"},
     )
+    assert invalid_role.status_code == 422
+
+    promoted = api_client.patch(
+        f"/api/v1/auth/users/{citizen.id}/role",
+        headers=_auth_header(admin),
+        json={"role": "admin"},
+    )
     assert promoted.status_code == 200
-    assert promoted.json()["role"] == "gestor_cemzoo"
+    assert promoted.json()["role"] == "admin"
 
     self_demote = api_client.patch(
         f"/api/v1/auth/users/{admin.id}/role",
@@ -314,10 +321,18 @@ def test_admin_role_assignment_rbac_and_self_demotion_guard(
     )
     assert self_demote.status_code == 400
 
+    demoted_other = api_client.patch(
+        f"/api/v1/auth/users/{citizen.id}/role",
+        headers=_auth_header(admin),
+        json={"role": "ciudadano"},
+    )
+    assert demoted_other.status_code == 200
+    assert demoted_other.json()["role"] == "ciudadano"
+
     missing = api_client.patch(
         f"/api/v1/auth/users/{uuid4()}/role",
         headers=_auth_header(admin),
-        json={"role": "gestor_cemzoo"},
+        json={"role": "admin"},
     )
     assert missing.status_code == 404
 
@@ -328,7 +343,7 @@ def test_presigned_upload_enforces_auth_mime_size_and_bucket_rbac(
     stub_s3: StubS3Client,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Presigned upload validates JWT, MIME whitelist, byte size limits, and bucket permissions."""
+    """Presigned upload validates JWT, image-only MIME whitelist, and byte size limits."""
     unauth = api_client.post(
         "/api/v1/storage/presigned-upload",
         json={"mime_type": "image/jpeg", "file_size_bytes": 1024},
@@ -336,7 +351,6 @@ def test_presigned_upload_enforces_auth_mime_size_and_bucket_rbac(
     assert unauth.status_code == 401
 
     citizen = _create_user(db_session, email="uploader@example.com", role=UserRole.CIUDADANO)
-    manager = _create_user(db_session, email="cemzoo-up@example.com", role=UserRole.GESTOR_CEMZOO)
 
     evidence_ok = api_client.post(
         "/api/v1/storage/presigned-upload",
@@ -350,12 +364,13 @@ def test_presigned_upload_enforces_auth_mime_size_and_bucket_rbac(
     assert ev_body["object_key"].endswith(".jpg")
     assert stub_s3.calls[-1]["Params"]["Bucket"] == "sos-evidences"
 
-    bad_mime = api_client.post(
-        "/api/v1/storage/presigned-upload",
-        headers=_auth_header(citizen),
-        json={"mime_type": "image/svg+xml", "file_size_bytes": 1024},
-    )
-    assert bad_mime.status_code == 415
+    for disallowed_mime in ("image/svg+xml", "video/mp4", "application/pdf"):
+        bad_mime = api_client.post(
+            "/api/v1/storage/presigned-upload",
+            headers=_auth_header(citizen),
+            json={"mime_type": disallowed_mime, "file_size_bytes": 1024},
+        )
+        assert bad_mime.status_code == 415
 
     bool_size = api_client.post(
         "/api/v1/storage/presigned-upload",
@@ -374,43 +389,6 @@ def test_presigned_upload_enforces_auth_mime_size_and_bucket_rbac(
         )
         assert too_large.status_code == 413
     get_settings.cache_clear()
-
-    citizen_norm_denied = api_client.post(
-        "/api/v1/storage/presigned-upload",
-        headers=_auth_header(citizen),
-        json={
-            "mime_type": "application/pdf",
-            "file_size_bytes": 1024,
-            "purpose": "norm",
-        },
-    )
-    assert citizen_norm_denied.status_code == 403
-
-    norm_non_pdf = api_client.post(
-        "/api/v1/storage/presigned-upload",
-        headers=_auth_header(manager),
-        json={
-            "mime_type": "image/jpeg",
-            "file_size_bytes": 1024,
-            "purpose": "norm",
-        },
-    )
-    assert norm_non_pdf.status_code == 415
-
-    norm_ok = api_client.post(
-        "/api/v1/storage/presigned-upload",
-        headers=_auth_header(manager),
-        json={
-            "mime_type": "application/pdf",
-            "file_size_bytes": 4096,
-            "purpose": "norm",
-        },
-    )
-    assert norm_ok.status_code == 200
-    norm_body = norm_ok.json()
-    assert norm_body["object_key"].startswith("norms/")
-    assert norm_body["object_key"].endswith(".pdf")
-    assert stub_s3.calls[-1]["Params"]["Bucket"] == "sos-documents"
 
 
 def test_login_sanitizes_nul_bytes_oversized_passwords_and_idna_domains(
@@ -567,17 +545,16 @@ def test_storage_hardening_empty_bucket_trimming_and_real_sigv4_headers(
         )
     assert empty_bucket_exc.value.status_code == 400
 
-    manager = _create_user(db_session, email="norm-cfg@example.com", role=UserRole.GESTOR_CEMZOO)
+    admin = _create_user(db_session, email="storage-admin@example.com", role=UserRole.ADMIN)
     with monkeypatch.context() as mp:
-        mp.setenv("MINIO_BUCKET_DOCUMENTS", "")
+        mp.setenv("MINIO_BUCKET_EVIDENCES", "")
         get_settings.cache_clear()
         misconfigured = api_client.post(
             "/api/v1/storage/presigned-upload",
-            headers=_auth_header(manager),
+            headers=_auth_header(admin),
             json={
-                "mime_type": "application/pdf",
+                "mime_type": "image/jpeg",
                 "file_size_bytes": 1024,
-                "purpose": "norm",
             },
         )
         assert misconfigured.status_code == 500
@@ -585,7 +562,7 @@ def test_storage_hardening_empty_bucket_trimming_and_real_sigv4_headers(
 
     padded_mime = api_client.post(
         "/api/v1/storage/presigned-upload",
-        headers=_auth_header(manager),
+        headers=_auth_header(admin),
         json={
             "mime_type": f"  image/jpeg{' ' * 95}",
             "file_size_bytes": 2048,
@@ -595,7 +572,7 @@ def test_storage_hardening_empty_bucket_trimming_and_real_sigv4_headers(
 
     blank_mime = api_client.post(
         "/api/v1/storage/presigned-upload",
-        headers=_auth_header(manager),
+        headers=_auth_header(admin),
         json={"mime_type": "   ", "file_size_bytes": 2048},
     )
     assert blank_mime.status_code == 422
@@ -626,11 +603,11 @@ def test_admin_list_users_rbac_filters_search_and_pagination(
         full_name="María López 100%",
         role=UserRole.CIUDADANO,
     )
-    manager = _create_user(
+    second_citizen = _create_user(
         db_session,
-        email="cemzoo_staff@example.com",
-        full_name="Gestor Zoonosis",
-        role=UserRole.GESTOR_CEMZOO,
+        email="carlos_perez@example.com",
+        full_name="Carlos Perez",
+        role=UserRole.CIUDADANO,
     )
     admin = _create_user(
         db_session,
@@ -639,7 +616,7 @@ def test_admin_list_users_rbac_filters_search_and_pagination(
         role=UserRole.ADMIN,
     )
 
-    for non_admin in (citizen, manager):
+    for non_admin in (citizen, second_citizen):
         denied = api_client.get("/api/v1/auth/users", headers=_auth_header(non_admin))
         assert denied.status_code == 403
 
@@ -648,7 +625,7 @@ def test_admin_list_users_rbac_filters_search_and_pagination(
     all_emails = [item["email"] for item in all_users.json()]
     assert set(all_emails) == {
         "maria.lopez@example.com",
-        "cemzoo_staff@example.com",
+        "carlos_perez@example.com",
         "super.admin@example.com",
     }
     assert all("password_hash" not in item for item in all_users.json())
@@ -656,10 +633,10 @@ def test_admin_list_users_rbac_filters_search_and_pagination(
     by_role = api_client.get(
         "/api/v1/auth/users",
         headers=_auth_header(admin),
-        params={"role": "gestor_cemzoo"},
+        params={"role": "admin"},
     )
     assert by_role.status_code == 200
-    assert [item["email"] for item in by_role.json()] == ["cemzoo_staff@example.com"]
+    assert [item["email"] for item in by_role.json()] == ["super.admin@example.com"]
 
     by_name_ci = api_client.get(
         "/api/v1/auth/users",
@@ -680,10 +657,10 @@ def test_admin_list_users_rbac_filters_search_and_pagination(
     underscore_escaped = api_client.get(
         "/api/v1/auth/users",
         headers=_auth_header(admin),
-        params={"search": "cemzoo_staff"},
+        params={"search": "carlos_perez"},
     )
     assert underscore_escaped.status_code == 200
-    assert [item["email"] for item in underscore_escaped.json()] == ["cemzoo_staff@example.com"]
+    assert [item["email"] for item in underscore_escaped.json()] == ["carlos_perez@example.com"]
 
     paginated = api_client.get(
         "/api/v1/auth/users",

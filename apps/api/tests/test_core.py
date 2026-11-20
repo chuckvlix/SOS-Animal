@@ -99,21 +99,21 @@ def test_require_role_rbac_enforcement() -> None:
         password_hash=hash_password("secret123"),
         role=UserRole.CIUDADANO,
     )
-    manager = User(
-        full_name="Gestor CEMZOO",
-        email="cemzoo@example.com",
+    admin = User(
+        full_name="Administrador Universidad",
+        email="admin@example.com",
         password_hash=hash_password("secret123"),
-        role=UserRole.GESTOR_CEMZOO,
+        role=UserRole.ADMIN,
     )
 
     with Session(engine) as session:
         session.add(citizen)
-        session.add(manager)
+        session.add(admin)
         session.commit()
         session.refresh(citizen)
-        session.refresh(manager)
+        session.refresh(admin)
         citizen_id = str(citizen.id)
-        manager_id = str(manager.id)
+        admin_id = str(admin.id)
 
     test_app = FastAPI()
 
@@ -125,7 +125,7 @@ def test_require_role_rbac_enforcement() -> None:
 
     @test_app.get("/protected")
     def protected_route(
-        user: Annotated[User, Depends(require_role([UserRole.ADMIN, UserRole.GESTOR_CEMZOO]))],
+        user: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
     ) -> dict[str, str]:
         return {"role": user.role}
 
@@ -141,13 +141,13 @@ def test_require_role_rbac_enforcement() -> None:
     )
     assert forbidden.status_code == 403
 
-    manager_token = create_access_token(subject=manager_id, role=UserRole.GESTOR_CEMZOO)
+    admin_token = create_access_token(subject=admin_id, role=UserRole.ADMIN)
     allowed = client.get(
         "/protected",
-        headers={"Authorization": f"Bearer {manager_token}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert allowed.status_code == 200
-    assert allowed.json() == {"role": "gestor_cemzoo"}
+    assert allowed.json() == {"role": "admin"}
 
 
 @pytest.mark.parametrize("mime_type", sorted(ALLOWED_EVIDENCE_MIME_TYPES))
@@ -175,6 +175,10 @@ def test_presigned_upload_rejects_disallowed_mime_and_invalid_sizes() -> None:
         generate_presigned_upload(mime_type="text/html", file_size_bytes=500, client=stub)
     assert mime_exc.value.status_code == 415
 
+    with pytest.raises(UploadValidationError) as video_exc:
+        generate_presigned_upload(mime_type="video/mp4", file_size_bytes=500, client=stub)
+    assert video_exc.value.status_code == 415
+
     with pytest.raises(UploadValidationError) as empty_exc:
         generate_presigned_upload(mime_type="image/jpeg", file_size_bytes=0, client=stub)
     assert empty_exc.value.status_code == 400
@@ -185,7 +189,7 @@ def test_presigned_upload_rejects_disallowed_mime_and_invalid_sizes() -> None:
 
     with pytest.raises(UploadValidationError) as large_exc:
         generate_presigned_upload(
-            mime_type="video/mp4",
+            mime_type="image/jpeg",
             file_size_bytes=100 * 1024 * 1024,
             client=stub,
         )

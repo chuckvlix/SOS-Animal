@@ -4,8 +4,9 @@ import PanelLayout from "../../layouts/PanelLayout.astro";
 ---
 
 <PanelLayout
-  title="Bandeja de Denuncias"
-  description="Bandeja institucional de denuncias ciudadanas para CEMZOO y administradores de SOS Animal."
+  title="Registro Histórico y Estadístico"
+  description="Observatorio histórico y estadístico de Documentos de Denuncia emitidos en SOS Animal."
+  requireAdmin={true}
 >
   <AdminComplaintsTrayIsland client:only="react" />
 </PanelLayout>

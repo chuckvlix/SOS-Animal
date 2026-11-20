@@ -1,5 +1,6 @@
 """Business logic for complaints draft/submit lifecycle, immutability, and PDF rendering."""
 
+import base64
 import logging
 import textwrap
 import uuid
@@ -22,6 +23,7 @@ from app.core.storage import (
     S3DocumentClientProtocol,
     UploadValidationError,
     delete_storage_object,
+    fetch_evidence_bytes,
     generate_presigned_download,
     upload_document_bytes,
     validate_upload_metadata,
@@ -38,9 +40,10 @@ from app.modules.complaints.models import (
 )
 from app.modules.complaints.schemas import (
     TRACKING_CODE_PATTERN,
+    ComplaintCategoryStat,
     ComplaintCreateRequest,
     ComplaintEvidenceCreateRequest,
-    ComplaintPublicTrackingRead,
+    ComplaintStatsRead,
     ComplaintUpdateRequest,
 )
 
@@ -83,20 +86,20 @@ DEFAULT_OFFENSE_CATEGORIES: tuple[tuple[OffenseMainType, str, str], ...] = (
     (OffenseMainType.BIOCIDIO, "Biocidio por crueldad", _BIOCIDIO_LEGAL_BASIS),
 )
 
+MIN_PHOTOS_PER_COMPLAINT = 1
+MAX_PHOTOS_PER_COMPLAINT = 3
+
 _EVIDENCE_ALLOWED_MIMES: dict[EvidenceType, frozenset[str]] = {
     EvidenceType.FOTO: frozenset({"image/jpeg", "image/png", "image/webp"}),
-    EvidenceType.VIDEO: frozenset({"video/mp4"}),
-    EvidenceType.DOCUMENTO: frozenset({"application/pdf"}),
 }
 
-_ALLOWED_INSTITUTIONAL_TRANSITIONS: dict[ComplaintStatus, frozenset[ComplaintStatus]] = {
-    ComplaintStatus.ENVIADA: frozenset(
-        {ComplaintStatus.EN_ATENCION_CEMZOO, ComplaintStatus.CERRADA}
-    ),
-    ComplaintStatus.EN_ATENCION_CEMZOO: frozenset({ComplaintStatus.CERRADA}),
-}
+_INSTITUTIONAL_ROLES: frozenset[UserRole] = frozenset({UserRole.ADMIN})
 
-_INSTITUTIONAL_ROLES: frozenset[UserRole] = frozenset({UserRole.ADMIN, UserRole.GESTOR_CEMZOO})
+_ALLOWED_DATA_IMAGE_PREFIXES: tuple[str, ...] = (
+    "data:image/jpeg;base64,",
+    "data:image/png;base64,",
+    "data:image/webp;base64,",
+)
 
 
 def ensure_offense_categories_seeded(session: Session) -> None:
@@ -356,10 +359,19 @@ def add_complaint_evidence(
     payload: ComplaintEvidenceCreateRequest,
     s3_client: S3DocumentClientProtocol,
 ) -> ComplaintEvidence:
-    """Attach a verified uploaded MinIO evidence object to a mutable BORRADOR complaint."""
+    """Attach a verified uploaded MinIO photograph (max 3) to a mutable BORRADOR complaint."""
     complaint = _get_complaint_or_404(session, complaint_id)
     _ensure_complaint_owner(complaint, current_user)
     _ensure_mutable_draft(complaint)
+
+    if len(complaint.evidences) >= MAX_PHOTOS_PER_COMPLAINT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"A maximum of {MAX_PHOTOS_PER_COMPLAINT} photographs can be attached "
+                "to a complaint."
+            ),
+        )
 
     try:
         validate_upload_metadata(
@@ -399,6 +411,18 @@ def add_complaint_evidence(
     locked_complaint = _get_complaint_or_404(session, complaint_id, lock_for_update=True)
     _ensure_complaint_owner(locked_complaint, current_user)
     _ensure_mutable_draft(locked_complaint)
+
+    existing_ids = session.exec(
+        select(ComplaintEvidence.id).where(ComplaintEvidence.complaint_id == locked_complaint.id)
+    ).all()
+    if len(existing_ids) >= MAX_PHOTOS_PER_COMPLAINT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"A maximum of {MAX_PHOTOS_PER_COMPLAINT} photographs can be attached "
+                "to a complaint."
+            ),
+        )
 
     duplicate = session.exec(
         select(ComplaintEvidence).where(ComplaintEvidence.object_key == payload.object_key)
@@ -484,7 +508,7 @@ def _format_utc(value: datetime | None, fallback: str) -> str:
 
 
 class _RestrictedURLFetcher:
-    """Callable URL fetcher blocking external/local requests inside WeasyPrint."""
+    """Callable URL fetcher allowing only safe base64 image data URIs inside WeasyPrint."""
 
     _fail_on_errors: bool = False
 
@@ -493,9 +517,17 @@ class _RestrictedURLFetcher:
         url: str,
         timeout: int = 10,
         ssl_context: object | None = None,
-    ) -> dict[str, object]:
-        """Block all external or local file fetches inside WeasyPrint to prevent SSRF."""
-        raise ValueError(f"External resource fetching is disabled: {url}")
+    ) -> object:
+        """Block external/local fetches while permitting embedded base64 photo data URIs."""
+        if not url.startswith(_ALLOWED_DATA_IMAGE_PREFIXES):
+            raise ValueError(f"External resource fetching is disabled: {url}")
+
+        from weasyprint.urls import URLFetcher
+
+        return URLFetcher(
+            allowed_protocols={"data"},
+            fail_on_errors=self._fail_on_errors,
+        ).fetch(url)
 
 
 _restricted_url_fetcher = _RestrictedURLFetcher()
@@ -524,11 +556,11 @@ def _build_minimal_pdf_bytes(
     complaint: Complaint,
     category: OffenseCategory,
 ) -> bytes:
-    """Generate a valid PDF fallback including legal basis, facts, and evidence keys."""
+    """Generate a valid PDF fallback including legal basis, facts, and photo annex metadata."""
     raw_lines = [
         "SOS ANIMAL - SUCRE, BOLIVIA",
         "DOCUMENTO DE DENUNCIA",
-        f"Codigo de seguimiento: {tracking_code}",
+        f"Codigo de referencia: {tracking_code}",
         f"Fecha de emision: {_format_utc(complaint.submitted_at, 'Pendiente de envio definitivo')}",
         f"Denunciante: {owner.full_name} (CI: {owner.ci_number or 'N/A'})",
         f"Telefono: {owner.phone or 'N/A'} | Domicilio: {owner.address or 'N/A'}",
@@ -541,9 +573,11 @@ def _build_minimal_pdf_bytes(
         raw_lines.append(f"Coordenadas GPS: {complaint.latitude}, {complaint.longitude}")
     raw_lines.append("Relato de los hechos:")
     raw_lines.append(complaint.description)
-    raw_lines.append(f"Evidencias adjuntas ({len(complaint.evidences)}):")
-    for item in complaint.evidences:
-        raw_lines.append(f"- {item.evidence_type.value}: {item.object_key} ({item.mime_type})")
+    raw_lines.append(f"Fotografias adjuntas ({len(complaint.evidences)}):")
+    if complaint.evidences:
+        raw_lines.append("ANEXO FOTOGRAFICO")
+        for idx, item in enumerate(complaint.evidences, start=1):
+            raw_lines.append(f"- Fotografia {idx}: {item.object_key} ({item.mime_type})")
 
     all_lines = _wrap_pdf_lines(raw_lines)
     lines_per_page = 42
@@ -605,11 +639,52 @@ def _build_minimal_pdf_bytes(
     return bytes(output)
 
 
-def render_complaint_html(*, session: Session, complaint: Complaint, owner: User) -> str:
-    """Render the formal Documento de Denuncia HTML using Jinja2 autoescaping."""
+def _build_photo_annex_items(
+    *,
+    complaint: Complaint,
+    s3_client: S3DocumentClientProtocol | None,
+) -> list[dict[str, str]]:
+    """Fetch photo evidence bytes from MinIO and encode safe base64 data URIs."""
+    if s3_client is None:
+        return []
+
+    photos = sorted(
+        (
+            item
+            for item in complaint.evidences
+            if item.evidence_type == EvidenceType.FOTO and item.mime_type in MIME_TO_EXTENSION
+        ),
+        key=lambda item: (item.created_at, str(item.id)),
+    )
+    annex_items: list[dict[str, str]] = []
+    for item in photos:
+        try:
+            raw_bytes = fetch_evidence_bytes(object_key=item.object_key, client=s3_client)
+        except UploadValidationError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        encoded = base64.b64encode(raw_bytes).decode("ascii")
+        annex_items.append(
+            {
+                "data_uri": f"data:{item.mime_type};base64,{encoded}",
+                "mime_type": item.mime_type,
+                "object_key": item.object_key,
+            }
+        )
+    return annex_items
+
+
+def render_complaint_html(
+    *,
+    session: Session,
+    complaint: Complaint,
+    owner: User,
+    s3_client: S3DocumentClientProtocol | None = None,
+) -> str:
+    """Render the formal Documento de Denuncia HTML with embedded photographic annex."""
     category = complaint.offense_category or _get_category_or_404(
         session, complaint.offense_category_id
     )
+    photo_annex = _build_photo_annex_items(complaint=complaint, s3_client=s3_client)
     template = _JINJA_ENV.get_template("complaint_pdf.html")
     return template.render(
         tracking_code=complaint.tracking_code or "BORRADOR (SIN CÓDIGO ASIGNADO)",
@@ -634,6 +709,7 @@ def render_complaint_html(*, session: Session, complaint: Complaint, owner: User
             }
             for item in complaint.evidences
         ],
+        photo_annex=photo_annex,
     )
 
 
@@ -647,9 +723,20 @@ def _is_missing_weasyprint_libs_error(exc: OSError) -> bool:
     )
 
 
-def render_complaint_pdf_bytes(*, session: Session, complaint: Complaint, owner: User) -> bytes:
+def render_complaint_pdf_bytes(
+    *,
+    session: Session,
+    complaint: Complaint,
+    owner: User,
+    s3_client: S3DocumentClientProtocol | None = None,
+) -> bytes:
     """Render the Documento de Denuncia PDF with WeasyPrint (or dev fallback on missing libs)."""
-    html = render_complaint_html(session=session, complaint=complaint, owner=owner)
+    html = render_complaint_html(
+        session=session,
+        complaint=complaint,
+        owner=owner,
+        s3_client=s3_client,
+    )
     try:
         import weasyprint
 
@@ -683,8 +770,9 @@ def get_complaint_preview(
     session: Session,
     current_user: User,
     complaint_id: uuid.UUID,
+    s3_client: S3DocumentClientProtocol | None = None,
 ) -> tuple[Complaint, str]:
-    """Return Step 6 HTML preview of Documento de Denuncia."""
+    """Return Step 3 HTML preview of Documento de Denuncia with embedded photo annex."""
     complaint = _get_complaint_or_404(session, complaint_id)
     _ensure_complaint_read_access(complaint, current_user)
     owner = session.get(User, complaint.user_id)
@@ -693,7 +781,12 @@ def get_complaint_preview(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Complaint owner missing.",
         )
-    html = render_complaint_html(session=session, complaint=complaint, owner=owner)
+    html = render_complaint_html(
+        session=session,
+        complaint=complaint,
+        owner=owner,
+        s3_client=s3_client,
+    )
     return complaint, html
 
 
@@ -731,7 +824,7 @@ def submit_complaint(
     complaint_id: uuid.UUID,
     s3_client: S3DocumentClientProtocol,
 ) -> Complaint:
-    """Validate legal profile completeness, atomically freeze complaint, and upload PDF to MinIO."""
+    """Validate profile and 1-3 photos, freeze complaint, and upload PDF to MinIO."""
     complaint = _get_complaint_or_404(session, complaint_id)
     _ensure_complaint_owner(complaint, current_user)
     _ensure_mutable_draft(complaint)
@@ -752,6 +845,16 @@ def submit_complaint(
             detail=(
                 "Complete your user profile before submitting the complaint: "
                 f"{', '.join(missing_fields)}."
+            ),
+        )
+
+    photo_count = len(complaint.evidences)
+    if photo_count < MIN_PHOTOS_PER_COMPLAINT or photo_count > MAX_PHOTOS_PER_COMPLAINT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Attach between {MIN_PHOTOS_PER_COMPLAINT} and "
+                f"{MAX_PHOTOS_PER_COMPLAINT} photographs before submitting the complaint."
             ),
         )
 
@@ -804,12 +907,17 @@ def submit_complaint(
         complaint.is_immutable = True
         complaint.pdf_url = object_key
 
-        with session.no_autoflush:
-            pdf_bytes = render_complaint_pdf_bytes(
-                session=session,
-                complaint=complaint,
-                owner=current_user,
-            )
+        try:
+            with session.no_autoflush:
+                pdf_bytes = render_complaint_pdf_bytes(
+                    session=session,
+                    complaint=complaint,
+                    owner=current_user,
+                    s3_client=s3_client,
+                )
+        except HTTPException:
+            session.rollback()
+            raise
 
         try:
             stored_key = upload_document_bytes(
@@ -867,53 +975,16 @@ def get_complaint_pdf_download_url(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-def get_public_tracking(*, session: Session, tracking_code: str) -> ComplaintPublicTrackingRead:
-    """Look up non-PII status metadata for a submitted complaint by tracking code."""
-    normalized_code = tracking_code.strip().upper()
-    if not TRACKING_CODE_PATTERN.fullmatch(normalized_code):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="tracking_code must match format 'SOS-XXXXXX-YYYY'.",
-        )
-
-    stmt = (
-        select(Complaint)
-        .where(Complaint.tracking_code == normalized_code)
-        .options(selectinload(Complaint.offense_category))  # type: ignore[arg-type]
-    )
-    complaint = session.exec(stmt).first()
-    if (
-        complaint is None
-        or not complaint.is_immutable
-        or complaint.submitted_at is None
-        or complaint.offense_category is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Complaint not found for the provided tracking code.",
-        )
-
-    return ComplaintPublicTrackingRead(
-        tracking_code=normalized_code,
-        status=complaint.status,
-        main_type=complaint.offense_category.main_type,
-        subtype_name=complaint.offense_category.subtype_name,
-        legal_basis=complaint.offense_category.legal_basis,
-        incident_date=complaint.incident_date,
-        created_at=complaint.created_at,
-        submitted_at=complaint.submitted_at,
-    )
-
-
 def list_institutional_complaints(
     *,
     session: Session,
-    status_filter: ComplaintStatus | None = None,
     main_type: OffenseMainType | None = None,
+    category_id: int | None = None,
+    search: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Complaint]:
-    """List submitted complaints for CEMZOO/Admin management, excluding mutable drafts."""
+    """List emitted immutable complaints for the University historical registry."""
     stmt = (
         select(Complaint)
         .where(Complaint.is_immutable == sa.true())
@@ -922,12 +993,18 @@ def list_institutional_complaints(
             selectinload(Complaint.evidences),  # type: ignore[arg-type]
         )
     )
-    if status_filter is not None:
-        if status_filter == ComplaintStatus.BORRADOR:
-            return []
-        stmt = stmt.where(Complaint.status == status_filter)
     if main_type is not None:
         stmt = stmt.join(OffenseCategory).where(OffenseCategory.main_type == main_type)
+    if category_id is not None:
+        stmt = stmt.where(Complaint.offense_category_id == category_id)
+    if search is not None and search.strip():
+        term = f"%{search.strip()}%"
+        stmt = stmt.where(
+            sa.or_(
+                sa.cast(Complaint.tracking_code, sa.String).ilike(term),
+                sa.cast(Complaint.incident_address, sa.String).ilike(term),
+            )
+        )
     stmt = (
         stmt.order_by(sa.desc(Complaint.submitted_at))  # type: ignore[arg-type]
         .offset(offset)
@@ -936,51 +1013,70 @@ def list_institutional_complaints(
     return list(session.exec(stmt).all())
 
 
-def update_complaint_status(
-    *,
-    session: Session,
-    complaint_id: uuid.UUID,
-    new_status: ComplaintStatus,
-) -> Complaint:
-    """Atomically transition an immutable submitted complaint through CEMZOO states."""
-    complaint = _get_complaint_or_404(session, complaint_id, lock_for_update=True)
-    if not complaint.is_immutable or complaint.status == ComplaintStatus.BORRADOR:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Draft complaints must be submitted before institutional status updates.",
-        )
-
-    current_status = complaint.status
-    allowed_next = _ALLOWED_INSTITUTIONAL_TRANSITIONS.get(current_status, frozenset())
-    if new_status not in allowed_next:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Cannot transition complaint status from {current_status.value} "
-                f"to {new_status.value}."
-            ),
-        )
-
-    update_result = session.execute(
-        sa.update(Complaint)
-        .where(
-            Complaint.id == complaint.id,
-            Complaint.is_immutable == sa.true(),
-            Complaint.status == current_status,
-        )
-        .values(status=new_status)
-        .execution_options(synchronize_session=False)
+def get_institutional_complaint_stats(*, session: Session) -> ComplaintStatsRead:
+    """Compute historical statistics of emitted complaints for the University admin panel."""
+    categories = list(
+        session.exec(select(OffenseCategory).order_by(sa.asc(OffenseCategory.id))).all()  # type: ignore[arg-type]
     )
-    if update_result.rowcount != 1:
-        session.rollback()
-        latest = _get_complaint_or_404(session, complaint_id)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Complaint status changed concurrently to {latest.status.value}; "
-                f"cannot transition to {new_status.value}."
-            ),
+    category_map = {category.id: category for category in categories}
+
+    grouped_rows = session.exec(
+        select(Complaint.offense_category_id, sa.func.count())
+        .where(Complaint.is_immutable == sa.true())
+        .group_by(Complaint.offense_category_id)
+    ).all()
+
+    total_submitted = 0
+    total_maltrato = 0
+    total_biocidio = 0
+    by_category: list[ComplaintCategoryStat] = []
+
+    for cat_id, raw_count in grouped_rows:
+        count = int(raw_count)
+        category = category_map.get(cat_id)
+        if category is None:
+            continue
+        total_submitted += count
+        if category.main_type == OffenseMainType.MALTRATO:
+            total_maltrato += count
+        else:
+            total_biocidio += count
+        by_category.append(
+            ComplaintCategoryStat(
+                category_id=cat_id,
+                main_type=category.main_type,
+                subtype_name=category.subtype_name,
+                count=count,
+            )
         )
-    session.commit()
-    session.expire_all()
-    return _get_complaint_or_404(session, complaint.id)
+
+    by_category.sort(key=lambda item: (-item.count, item.category_id))
+
+    total_with_coordinates = int(
+        session.exec(
+            select(sa.func.count())
+            .select_from(Complaint)
+            .where(
+                Complaint.is_immutable == sa.true(),
+                sa.cast(Complaint.latitude, sa.Float).is_not(None),
+                sa.cast(Complaint.longitude, sa.Float).is_not(None),
+            )
+        ).one()
+    )
+    total_photos = int(
+        session.exec(
+            select(sa.func.count())
+            .select_from(ComplaintEvidence)
+            .join(Complaint, ComplaintEvidence.complaint_id == Complaint.id)  # type: ignore[arg-type]
+            .where(Complaint.is_immutable == sa.true())
+        ).one()
+    )
+
+    return ComplaintStatsRead(
+        total_submitted=total_submitted,
+        total_maltrato=total_maltrato,
+        total_biocidio=total_biocidio,
+        total_with_coordinates=total_with_coordinates,
+        total_photos=total_photos,
+        by_category=by_category,
+    )

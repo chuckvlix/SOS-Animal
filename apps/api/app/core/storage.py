@@ -1,19 +1,18 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Protocol
 from uuid import uuid4
 
 import boto3
 from botocore.client import BaseClient
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import CurrentUser
-from app.modules.auth.models import User, UserRole
 
 PRESIGNED_UPLOAD_EXPIRY_SECONDS: int = 180
 
@@ -21,8 +20,6 @@ MIME_TO_EXTENSION: dict[str, str] = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
-    "video/mp4": ".mp4",
-    "application/pdf": ".pdf",
 }
 
 ALLOWED_EVIDENCE_MIME_TYPES: frozenset[str] = frozenset(MIME_TO_EXTENSION.keys())
@@ -78,6 +75,13 @@ class S3DocumentClientProtocol(S3ClientProtocol, Protocol):
     ) -> object: ...
 
     def head_object(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+    ) -> Mapping[str, object]: ...
+
+    def get_object(
         self,
         *,
         Bucket: str,
@@ -216,17 +220,13 @@ def generate_presigned_upload(
     )
 
 
-PresignedUploadPurpose = Literal["evidence", "norm"]
-
-
 class PresignedUploadRequest(BaseModel):
-    """Metadata validated before issuing a time-limited S3/MinIO PUT URL."""
+    """Metadata validated before issuing a time-limited S3/MinIO PUT URL for photos."""
 
     model_config = ConfigDict(extra="forbid")
 
     mime_type: str = Field(min_length=3, max_length=100)
     file_size_bytes: StrictInt = Field(gt=0)
-    purpose: PresignedUploadPurpose = "evidence"
 
     @field_validator("mime_type", mode="before")
     @classmethod
@@ -408,37 +408,56 @@ def delete_storage_object(
         ) from exc
 
 
-def _resolve_upload_target(
+def fetch_evidence_bytes(
     *,
-    purpose: PresignedUploadPurpose,
-    current_user: User,
-    normalized_mime: str,
-    current_settings: Settings,
-) -> tuple[str, str]:
-    """Enforce bucket-level RBAC and return the target (bucket, prefix) tuple."""
-    if purpose == "norm":
-        if current_user.role not in {UserRole.ADMIN, UserRole.GESTOR_CEMZOO}:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions to upload norm documents.",
-            )
-        if normalized_mime != "application/pdf":
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail="Norm documents must use application/pdf MIME type.",
-            )
-        target_bucket = current_settings.MINIO_BUCKET_DOCUMENTS.strip()
-        if not target_bucket:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Document storage bucket is not configured.",
-            )
-        return target_bucket, "norms"
+    object_key: str,
+    bucket: str | None = None,
+    client: S3DocumentClientProtocol | None = None,
+) -> bytes:
+    """Download verified evidence image bytes from MinIO for PDF photographic annex embedding."""
+    current_settings = get_settings()
+    target_bucket = (current_settings.MINIO_BUCKET_EVIDENCES if bucket is None else bucket).strip()
+    if not target_bucket:
+        raise UploadValidationError("Target storage bucket must not be empty.", status_code=400)
+    clean_key = _sanitize_object_prefix(object_key)
+    s3_client = client or create_s3_client(current_settings.MINIO_ENDPOINT)
+    try:
+        response = s3_client.get_object(Bucket=target_bucket, Key=clean_key)
+    except ClientError as exc:
+        if _is_s3_not_found_error(exc):
+            raise UploadValidationError(
+                "Uploaded evidence photo was not found in storage.",
+                status_code=422,
+            ) from exc
+        raise UploadValidationError(
+            "Failed to read evidence photo from object storage.",
+            status_code=502,
+        ) from exc
+    except BotoCoreError as exc:
+        raise UploadValidationError(
+            "Failed to read evidence photo from object storage.",
+            status_code=502,
+        ) from exc
 
+    body = response.get("Body")
+    read_fn = getattr(body, "read", None)
+    raw_bytes = read_fn() if callable(read_fn) else body
+    if not isinstance(raw_bytes, (bytes, bytearray)) or len(raw_bytes) == 0:
+        raise UploadValidationError("Stored evidence photo is empty.", status_code=422)
+    if len(raw_bytes) > current_settings.MAX_UPLOAD_SIZE_BYTES:
+        raise UploadValidationError(
+            "Stored evidence photo exceeds maximum allowed byte size.",
+            status_code=413,
+        )
+    return bytes(raw_bytes)
+
+
+def _resolve_evidence_bucket(current_settings: Settings) -> tuple[str, str]:
+    """Return the configured MinIO bucket and key prefix for complaint photos."""
     target_bucket = current_settings.MINIO_BUCKET_EVIDENCES.strip()
     if not target_bucket:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail="Evidence storage bucket is not configured.",
         )
     return target_bucket, "evidences"
@@ -450,21 +469,16 @@ router = APIRouter(prefix="/storage", tags=["Storage"])
 @router.post("/presigned-upload", response_model=PresignedUploadResponse)
 def request_presigned_upload(
     payload: PresignedUploadRequest,
-    current_user: CurrentUser,
+    _current_user: CurrentUser,
     s3_client: Annotated[S3ClientProtocol, Depends(get_s3_client)],
 ) -> PresignedUploadResponse:
-    """Validate upload metadata and return a 180-second presigned MinIO PUT URL.
+    """Validate photo metadata and return a 180-second presigned MinIO PUT URL.
 
     The caller must execute the HTTP PUT using the exact byte size and lowercase
     Content-Type header signed in the returned URL.
     """
     current_settings = get_settings()
-    target_bucket, target_prefix = _resolve_upload_target(
-        purpose=payload.purpose,
-        current_user=current_user,
-        normalized_mime=payload.mime_type,
-        current_settings=current_settings,
-    )
+    target_bucket, target_prefix = _resolve_evidence_bucket(current_settings)
 
     try:
         result = generate_presigned_upload(

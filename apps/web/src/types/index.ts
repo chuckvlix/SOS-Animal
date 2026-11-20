@@ -1,22 +1,12 @@
-export type UserRole = "ciudadano" | "gestor_cemzoo" | "admin";
+export type UserRole = "ciudadano" | "admin";
 
 export type OffenseMainType = "MALTRATO" | "BIOCIDIO";
 
-export type ComplaintStatus =
-  | "BORRADOR"
-  | "ENVIADA"
-  | "EN_ATENCION_CEMZOO"
-  | "CERRADA";
+export type ComplaintStatus = "BORRADOR" | "ENVIADA";
 
-export type EvidenceType = "FOTO" | "VIDEO" | "DOCUMENTO";
+export type EvidenceType = "FOTO";
 
 export type CenterCategory = "ZOONOSIS" | "VETERINARIA";
-
-export type CampaignType =
-  | "CALENDARIO_VACUNACION"
-  | "CAMPANA_ESTERILIZACION"
-  | "ATENCION_EMERGENCIA"
-  | "PROXIMA_JORNADA";
 
 export interface HealthResponse {
   status: string;
@@ -58,12 +48,9 @@ export interface UserRoleUpdate {
   role: UserRole;
 }
 
-export type PresignedUploadPurpose = "evidence" | "norm";
-
 export interface PresignedUploadRequest {
   mime_type: string;
   file_size_bytes: number;
-  purpose?: PresignedUploadPurpose;
 }
 
 export interface PresignedUploadResponse {
@@ -145,19 +132,20 @@ export interface ComplaintDownloadUrlResponse {
   expires_in_seconds: number;
 }
 
-export interface ComplaintPublicTrackingRead {
-  tracking_code: string;
-  status: ComplaintStatus;
+export interface ComplaintCategoryStat {
+  category_id: number;
   main_type: OffenseMainType;
   subtype_name: string;
-  legal_basis: string;
-  incident_date: string;
-  created_at: string;
-  submitted_at: string;
+  count: number;
 }
 
-export interface ComplaintStatusUpdateRequest {
-  status: "EN_ATENCION_CEMZOO" | "CERRADA";
+export interface ComplaintStatsRead {
+  total_submitted: number;
+  total_maltrato: number;
+  total_biocidio: number;
+  total_with_coordinates: number;
+  total_photos: number;
+  by_category: ComplaintCategoryStat[];
 }
 
 export interface AttentionCenterRead {
@@ -172,28 +160,4 @@ export interface AttentionCenterRead {
   is_24_hours: boolean;
   services: string;
   is_active: boolean;
-}
-
-export interface CampaignRead {
-  id: number;
-  title: string;
-  campaign_type: CampaignType;
-  description: string;
-  requirements: string | null;
-  location_address: string;
-  latitude: number | null;
-  longitude: number | null;
-  start_date: string;
-  end_date: string;
-  institution: string;
-  created_by: string;
-}
-
-export interface LegalNormRead {
-  id: number;
-  title: string;
-  summary_text: string;
-  pdf_object_key: string | null;
-  is_active: boolean;
-  updated_at: string;
 }

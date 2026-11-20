@@ -8,10 +8,8 @@ from app.core.config import settings
 from app.core.database import SessionDep
 from app.core.storage import router as storage_router
 from app.modules.auth.router import router as auth_router
-from app.modules.campaigns.router import router as campaigns_router
 from app.modules.complaints.router import router as complaints_router
 from app.modules.directory.router import router as directory_router
-from app.modules.norms.router import router as norms_router
 
 
 class HealthResponse(BaseModel):
@@ -74,8 +72,6 @@ def create_app() -> FastAPI:
     api_router.include_router(storage_router)
     api_router.include_router(complaints_router)
     api_router.include_router(directory_router)
-    api_router.include_router(campaigns_router)
-    api_router.include_router(norms_router)
 
     application.include_router(api_router)
     return application

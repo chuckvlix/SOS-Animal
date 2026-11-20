@@ -339,17 +339,16 @@ export default function AuthLoginIsland() {
             </span>
             <div>
               <h2 className="m-0 font-display text-base font-semibold text-text-primary">
-                ¿Solo deseas consultar un caso enviado?
+                ¿Necesitas atención veterinaria inmediata?
               </h2>
               <p className="mt-1 text-xs leading-relaxed text-text-secondary">
-                No necesitas iniciar sesión para revisar el avance público con tu código correlativo
-                (<span className="tabular-nums font-semibold">SOS-XXXXXX-2026</span>).
+                No necesitas iniciar sesión para consultar Zoonosis y clínicas veterinarias cercanas en Sucre.
               </p>
               <a
-                href="/seguimiento"
+                href="/mapa"
                 className="mt-3 inline-flex min-h-[40px] items-center rounded-lg border border-border bg-bg-canvas px-3.5 py-2 text-xs font-semibold text-text-primary no-underline transition-colors hover:bg-primary-soft hover:text-primary"
               >
-                Ir a seguimiento público
+                Explorar mapa veterinario
               </a>
             </div>
           </div>

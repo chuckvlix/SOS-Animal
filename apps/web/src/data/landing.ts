@@ -17,8 +17,8 @@ export const HERO_CONTENT: HeroContent = {
     href: "/denunciar",
   },
   secondaryCta: {
-    label: "Consultar Código de Caso",
-    href: "/seguimiento",
+    label: "Ver Veterinarias y Zoonosis",
+    href: "/mapa",
   },
   image: {
     src: "/images/hero-pets.webp",
@@ -36,7 +36,7 @@ export const ABOUT_MISSION_CONTENT: AboutMissionContent = {
     "SOS Animal reúne orientación jurídica, educación preventiva en un espacio claro y un directorio georreferenciado de Zoonosis y centros veterinarios accesibles para toda la población.",
   points: [
     "Acceso inmediato a normativa, mapas y educación",
-    "Ruta guiada en 7 pasos para iniciar una denuncia",
+    "Ruta guiada en 4 pasos para generar tu Documento de Denuncia",
     "Red de Zoonosis (CEMZOO) y clínicas veterinarias",
     "Información sobre campañas de vacunación y esterilización",
   ],
@@ -59,35 +59,35 @@ export const COMPLAINT_PROCESS_STEPS: readonly ProcessStep[] = [
     stepNumber: "01",
     title: "Tipifica el caso",
     description:
-      "Elige entre Maltrato (Art. 350 bis) o Biocidio (Art. 350 ter) y la modalidad del hecho.",
-    tag: "Pasos 1–3",
+      "Elige entre Maltrato (Art. 350 bis) o Biocidio (Art. 350 ter) y vincula el sustento de la Ley N.º 700/2015.",
+    tag: "Paso 1",
     icon: "sos",
     accent: "sos",
   },
   {
     stepNumber: "02",
-    title: "Sustento legal",
+    title: "Hechos y 1–3 fotos",
     description:
-      "Se vinculan automáticamente los artículos aplicables de la Ley N.º 700/2015 y normativa local.",
-    tag: "Paso 4",
-    icon: "legal",
-    accent: "primary",
-  },
-  {
-    stepNumber: "03",
-    title: "Hechos y pruebas",
-    description:
-      "Registra ubicación y adjunta fotografías, videos o documentos con subida protegida.",
-    tag: "Pasos 5–6",
+      "Registra lugar, fecha, relato y adjunta entre 1 y 3 fotografías que formarán el Anexo Fotográfico.",
+    tag: "Paso 2",
     icon: "shield",
     accent: "secondary",
   },
   {
-    stepNumber: "04",
-    title: "PDF y código SOS",
+    stepNumber: "03",
+    title: "Tus datos y revisión",
     description:
-      "Descarga tu denuncia para presentarla y consulta avances con tu código SOS.",
-    tag: "Paso 7",
+      "Completa tu identidad legal y revisa la vista previa oficial del Documento de Denuncia.",
+    tag: "Paso 3",
+    icon: "legal",
+    accent: "primary",
+  },
+  {
+    stepNumber: "04",
+    title: "Descarga tu PDF",
+    description:
+      "Emite tu Documento de Denuncia con código correlativo y descárgalo listo para presentar ante autoridades.",
+    tag: "Paso 4",
     icon: "cases",
     accent: "primary",
   },

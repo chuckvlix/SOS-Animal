@@ -9,22 +9,12 @@ export const COMPLAINT_STATUS_META: Record<ComplaintStatus, BadgeMeta & { readon
   BORRADOR: {
     label: "Borrador editable",
     badgeClass: "border-border bg-bg-canvas text-text-secondary",
-    description: "Puedes editar los hechos, el mapa y las evidencias antes de emitir el documento definitivo.",
+    description: "Puedes editar los hechos, las fotografías y tus datos antes de emitir el Documento de Denuncia.",
   },
   ENVIADA: {
-    label: "Enviada",
+    label: "Documento emitido",
     badgeClass: "border-primary/25 bg-primary-soft text-primary",
-    description: "Denuncia registrada e inmutable. Lista para descarga en PDF o atención institucional.",
-  },
-  EN_ATENCION_CEMZOO: {
-    label: "En atención CEMZOO",
-    badgeClass: "border-secondary/30 bg-secondary-soft text-secondary-text",
-    description: "El equipo del Centro Municipal de Zoonosis (CEMZOO) está dando seguimiento al caso.",
-  },
-  CERRADA: {
-    label: "Cerrada",
-    badgeClass: "border-border bg-slate-100 text-text-primary",
-    description: "El caso completó su ciclo de atención y registro institucional.",
+    description: "Documento de Denuncia emitido e inmutable con Anexo Fotográfico, listo para descargar e imprimir en PDF.",
   },
 };
 
@@ -50,10 +40,6 @@ export const USER_ROLE_META: Record<UserRole, BadgeMeta> = {
   ciudadano: {
     label: "Ciudadano",
     badgeClass: "border-border bg-bg-canvas text-text-secondary",
-  },
-  gestor_cemzoo: {
-    label: "Gestor CEMZOO",
-    badgeClass: "border-secondary/30 bg-secondary-soft text-secondary-text",
   },
   admin: {
     label: "Administrador",

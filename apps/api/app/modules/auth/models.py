@@ -12,7 +12,6 @@ class UserRole(StrEnum):
     """Valid RBAC roles for SOS Animal."""
 
     CIUDADANO = "ciudadano"
-    GESTOR_CEMZOO = "gestor_cemzoo"
     ADMIN = "admin"
 
 

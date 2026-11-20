@@ -21,7 +21,7 @@ export const AUTH_CHANGE_EVENT = "sos-auth-change";
 let inFlightCurrentUser: Promise<UserRead> | null = null;
 
 function isValidUserRole(value: unknown): value is UserRole {
-  return value === "ciudadano" || value === "gestor_cemzoo" || value === "admin";
+  return value === "ciudadano" || value === "admin";
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -186,13 +186,6 @@ export function resolvePostAuthDestination(role: UserRole, rawNext: string | nul
   }
 
   if (normalizedPathname === "/panel") {
-    return "/panel/denuncias";
-  }
-
-  if (
-    role === "gestor_cemzoo" &&
-    (normalizedPathname === "/panel/usuarios" || normalizedPathname.startsWith("/panel/usuarios/"))
-  ) {
     return "/panel/denuncias";
   }
 
