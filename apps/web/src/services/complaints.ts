@@ -4,10 +4,8 @@ import type {
   ComplaintEvidenceCreateRequest,
   ComplaintEvidenceRead,
   ComplaintPreviewResponse,
-  ComplaintPublicTrackingRead,
   ComplaintRead,
-  ComplaintStatus,
-  ComplaintStatusUpdateRequest,
+  ComplaintStatsRead,
   ComplaintUpdateRequest,
   OffenseCategoryRead,
   OffenseMainType,
@@ -19,14 +17,6 @@ export function fetchOffenseCategories(
 ): Promise<OffenseCategoryRead[]> {
   const qs = mainType ? `?main_type=${encodeURIComponent(mainType)}` : "";
   return apiRequest<OffenseCategoryRead[]>(`/complaints/categories${qs}`);
-}
-
-export function fetchPublicTracking(
-  trackingCode: string,
-): Promise<ComplaintPublicTrackingRead> {
-  return apiRequest<ComplaintPublicTrackingRead>(
-    `/complaints/track/${encodeURIComponent(trackingCode.trim().toUpperCase())}`,
-  );
 }
 
 export function fetchMyComplaints(
@@ -41,8 +31,9 @@ export function fetchMyComplaints(
 }
 
 export interface InstitutionalComplaintsParams {
-  status?: ComplaintStatus;
   main_type?: OffenseMainType;
+  category_id?: number;
+  search?: string;
   limit?: number;
   offset?: number;
 }
@@ -51,11 +42,14 @@ export function fetchInstitutionalComplaints(
   params: InstitutionalComplaintsParams = {},
 ): Promise<ComplaintRead[]> {
   const query = new URLSearchParams();
-  if (params.status) {
-    query.set("status", params.status);
-  }
   if (params.main_type) {
     query.set("main_type", params.main_type);
+  }
+  if (typeof params.category_id === "number") {
+    query.set("category_id", String(params.category_id));
+  }
+  if (params.search && params.search.trim()) {
+    query.set("search", params.search.trim());
   }
   if (typeof params.limit === "number") {
     query.set("limit", String(params.limit));
@@ -65,6 +59,10 @@ export function fetchInstitutionalComplaints(
   }
   const qs = query.toString();
   return apiRequest<ComplaintRead[]>(qs ? `/complaints?${qs}` : "/complaints");
+}
+
+export function fetchInstitutionalComplaintStats(): Promise<ComplaintStatsRead> {
+  return apiRequest<ComplaintStatsRead>("/complaints/stats");
 }
 
 export function createDraftComplaint(
@@ -143,18 +141,5 @@ export function fetchComplaintPdfDownloadUrl(
 ): Promise<ComplaintDownloadUrlResponse> {
   return apiRequest<ComplaintDownloadUrlResponse>(
     `/complaints/${encodeURIComponent(complaintId)}/pdf`,
-  );
-}
-
-export function updateInstitutionalComplaintStatus(
-  complaintId: string,
-  payload: ComplaintStatusUpdateRequest,
-): Promise<ComplaintRead> {
-  return apiRequest<ComplaintRead>(
-    `/complaints/${encodeURIComponent(complaintId)}/status`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    },
   );
 }

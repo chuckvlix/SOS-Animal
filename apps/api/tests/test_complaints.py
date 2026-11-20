@@ -1,5 +1,7 @@
 """Unit and integration tests for the complaints module and immutable PDF lifecycle."""
 
+import base64
+import io
 import sys
 import threading
 from collections.abc import Generator
@@ -31,6 +33,7 @@ from app.modules.complaints.models import (
     Complaint,
     ComplaintEvidence,
     ComplaintStatus,
+    EvidenceType,
     OffenseCategory,
     OffenseMainType,
 )
@@ -109,6 +112,27 @@ class StubS3Client:
         self.deleted_keys.append((Bucket, Key))
         self.uploaded_objects.pop((Bucket, Key), None)
         return {}
+
+    def get_object(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+    ) -> dict[str, Any]:
+        """Return stored object bytes stream or raise S3 404 ClientError when absent."""
+        stored = self.uploaded_objects.get((Bucket, Key))
+        if stored is None:
+            raise ClientError(
+                {
+                    "Error": {"Code": "404", "Message": "Not Found"},
+                    "ResponseMetadata": {"HTTPStatusCode": 404},
+                },
+                "GetObject",
+            )
+        return {
+            "Body": io.BytesIO(stored["Body"]),
+            "ContentType": stored["ContentType"],
+        }
 
 
 @pytest.fixture
@@ -204,14 +228,47 @@ def _seed_evidence_in_s3(
     object_key: str,
     mime_type: str = "image/jpeg",
     size_bytes: int = 4096,
+    body: bytes | None = None,
     bucket: str = "sos-evidences",
 ) -> None:
+    payload = body if body is not None else b"x" * size_bytes
     s3_client.put_object(
         Bucket=bucket,
         Key=object_key,
-        Body=b"x" * size_bytes,
+        Body=payload,
         ContentType=mime_type,
     )
+
+
+def _attach_photo_via_api(
+    client: TestClient,
+    headers: dict[str, str],
+    s3_client: StubS3Client,
+    draft_id: str,
+    *,
+    mime_type: str = "image/jpeg",
+    ext: str = ".jpg",
+    payload: bytes = b"\xff\xd8\xff\xe0stub-photo-bytes",
+) -> dict[str, Any]:
+    object_key = f"evidences/{uuid4()}{ext}"
+    _seed_evidence_in_s3(
+        s3_client,
+        object_key=object_key,
+        mime_type=mime_type,
+        body=payload,
+    )
+    resp = client.post(
+        f"/api/v1/complaints/{draft_id}/evidences",
+        headers=headers,
+        json={
+            "evidence_type": "FOTO",
+            "object_key": object_key,
+            "mime_type": mime_type,
+            "file_size_bytes": len(payload),
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return dict(resp.json())
 
 
 def _create_draft_via_api(
@@ -485,6 +542,18 @@ def test_evidence_validation_dedup_and_deletion(
     )
     assert mismatched_type.status_code == 422
 
+    disallowed_doc = api_client.post(
+        f"/api/v1/complaints/{draft_id}/evidences",
+        headers=headers,
+        json={
+            "evidence_type": "DOCUMENTO",
+            "object_key": f"evidences/{uuid4()}.pdf",
+            "mime_type": "application/pdf",
+            "file_size_bytes": 2048,
+        },
+    )
+    assert disallowed_doc.status_code == 422
+
     mismatched_ext = api_client.post(
         f"/api/v1/complaints/{draft_id}/evidences",
         headers=headers,
@@ -560,6 +629,28 @@ def test_evidence_validation_dedup_and_deletion(
         },
     )
     assert attached_for_draft_del.status_code == 201
+
+    _attach_photo_via_api(
+        api_client, headers, internal_s3, draft_id, mime_type="image/png", ext=".png"
+    )
+    _attach_photo_via_api(
+        api_client, headers, internal_s3, draft_id, mime_type="image/jpeg", ext=".jpg"
+    )
+
+    fourth_key = f"evidences/{uuid4()}.jpg"
+    _seed_evidence_in_s3(internal_s3, object_key=fourth_key, mime_type="image/jpeg", size_bytes=512)
+    fourth_denied = api_client.post(
+        f"/api/v1/complaints/{draft_id}/evidences",
+        headers=headers,
+        json={
+            "evidence_type": "FOTO",
+            "object_key": fourth_key,
+            "mime_type": "image/jpeg",
+            "file_size_bytes": 512,
+        },
+    )
+    assert fourth_denied.status_code == 409
+
     assert api_client.delete(f"/api/v1/complaints/{draft_id}", headers=headers).status_code == 204
     assert ("sos-evidences", orphan_key) in internal_s3.deleted_keys
 
@@ -570,7 +661,7 @@ def test_submit_requires_complete_profile_then_locks_immutability_and_generates_
     public_s3: StubS3Client,
     internal_s3: StubS3Client,
 ) -> None:
-    """Submission enforces progressive profile, uploads PDF to MinIO, and freezes mutations."""
+    """Enforce 1-3 photos and complete profile, embed photo annex, and freeze draft."""
     category_id = api_client.get("/api/v1/complaints/categories").json()[8]["id"]
     incomplete_user = _create_user(
         db_session,
@@ -583,31 +674,26 @@ def test_submit_requires_complete_profile_then_locks_immutability_and_generates_
     draft = _create_draft_via_api(api_client, headers, category_id)
     draft_id = draft["id"]
 
-    doc_key = f"evidences/{uuid4()}.pdf"
-    _seed_evidence_in_s3(
+    png_bytes = b"\x89PNG\r\n\x1a\nstub-png-payload"
+    attached_photo = _attach_photo_via_api(
+        api_client,
+        headers,
         internal_s3,
-        object_key=doc_key,
-        mime_type="application/pdf",
-        size_bytes=8192,
+        draft_id,
+        mime_type="image/png",
+        ext=".png",
+        payload=png_bytes,
     )
-    evidence_resp = api_client.post(
-        f"/api/v1/complaints/{draft_id}/evidences",
-        headers=headers,
-        json={
-            "evidence_type": "DOCUMENTO",
-            "object_key": doc_key,
-            "mime_type": "application/pdf",
-            "file_size_bytes": 8192,
-        },
-    )
-    assert evidence_resp.status_code == 201
-    evidence_id = evidence_resp.json()["id"]
+    evidence_id = attached_photo["id"]
+    expected_b64 = base64.b64encode(png_bytes).decode("ascii")
 
     preview = api_client.get(f"/api/v1/complaints/{draft_id}/preview", headers=headers)
     assert preview.status_code == 200
     preview_data = preview.json()
     assert preview_data["title"] == "DOCUMENTO DE DENUNCIA"
     assert "DOCUMENTO DE DENUNCIA" in preview_data["html_preview"]
+    assert "VI. Anexo Fotográfico" in preview_data["html_preview"]
+    assert f"data:image/png;base64,{expected_b64}" in preview_data["html_preview"]
     assert "memorial" not in preview_data["html_preview"].lower()
 
     pdf_before_submit = api_client.get(f"/api/v1/complaints/{draft_id}/pdf", headers=headers)
@@ -629,6 +715,14 @@ def test_submit_requires_complete_profile_then_locks_immutability_and_generates_
         },
     )
     assert profile_patch.status_code == 200
+
+    draft_no_photos = _create_draft_via_api(api_client, headers, category_id)
+    blocked_no_photos = api_client.post(
+        f"/api/v1/complaints/{draft_no_photos['id']}/submit",
+        headers=headers,
+    )
+    assert blocked_no_photos.status_code == 400
+    assert "photographs" in blocked_no_photos.json()["detail"]
 
     submitted = api_client.post(f"/api/v1/complaints/{draft_id}/submit", headers=headers)
     assert submitted.status_code == 200, submitted.text
@@ -696,23 +790,42 @@ def test_submit_requires_complete_profile_then_locks_immutability_and_generates_
     )
 
 
-def test_public_tracking_institutional_workflow_and_sequential_codes(
+def test_admin_historical_registry_stats_and_removed_tracking_routes(
     api_client: TestClient,
     db_session: Session,
+    internal_s3: StubS3Client,
 ) -> None:
-    """Public tracking hides PII while CEMZOO/Admin can filter and transition statuses."""
+    """Admin views historical complaints & stats; tracking and status transitions are removed."""
     categories = api_client.get("/api/v1/complaints/categories").json()
     maltrato_id = categories[0]["id"]
     biocidio_id = categories[8]["id"]
 
     citizen = _create_user(db_session, email="reporter@example.com")
-    cemzoo = _create_user(db_session, email="cemzoo@example.com", role=UserRole.GESTOR_CEMZOO)
+    admin = _create_user(db_session, email="admin-panel@example.com", role=UserRole.ADMIN)
     citizen_headers = _auth_headers(citizen)
-    cemzoo_headers = _auth_headers(cemzoo)
+    admin_headers = _auth_headers(admin)
 
-    draft_one = _create_draft_via_api(api_client, citizen_headers, maltrato_id)
-    draft_two = _create_draft_via_api(api_client, citizen_headers, biocidio_id)
+    draft_one = _create_draft_via_api(
+        api_client,
+        citizen_headers,
+        maltrato_id,
+        address="Av. Las Americas 210",
+    )
+    _attach_photo_via_api(api_client, citizen_headers, internal_s3, draft_one["id"])
+    _attach_photo_via_api(api_client, citizen_headers, internal_s3, draft_one["id"])
+
+    draft_two = _create_draft_via_api(
+        api_client,
+        citizen_headers,
+        biocidio_id,
+        address="Mercado Campesino Sector B",
+        latitude=None,
+        longitude=None,
+    )
+    _attach_photo_via_api(api_client, citizen_headers, internal_s3, draft_two["id"])
+
     draft_pending = _create_draft_via_api(api_client, citizen_headers, maltrato_id)
+    _attach_photo_via_api(api_client, citizen_headers, internal_s3, draft_pending["id"])
 
     sub_one = api_client.post(
         f"/api/v1/complaints/{draft_one['id']}/submit",
@@ -727,41 +840,20 @@ def test_public_tracking_institutional_workflow_and_sequential_codes(
     assert sub_one["tracking_code"] == f"SOS-000001-{year}"
     assert sub_two["tracking_code"] == f"SOS-000002-{year}"
 
-    track_ok = api_client.get(f"/api/v1/complaints/track/{sub_one['tracking_code'].lower()}")
-    assert track_ok.status_code == 200
-    tracked = track_ok.json()
-    assert tracked["tracking_code"] == sub_one["tracking_code"]
-    assert tracked["status"] == "ENVIADA"
-    assert tracked["main_type"] == "MALTRATO"
-    for pii_field in (
-        "full_name",
-        "ci_number",
-        "phone",
-        "address",
-        "incident_address",
-        "description",
-        "pdf_url",
-    ):
-        assert pii_field not in tracked
-
-    assert api_client.get(f"/api/v1/complaints/track/SOS-999999-{year}").status_code == 404
-    assert api_client.get("/api/v1/complaints/track/INVALID-CODE").status_code == 422
-    assert (
-        api_client.get("/api/v1/complaints/track/SOS-\uff10\uff10\uff10\uff10\uff10\uff11-\uff12\uff10\uff12\uff16").status_code
-        == 422
-    )
-
-    assert api_client.get("/api/v1/complaints", headers=citizen_headers).status_code == 403
+    assert api_client.get(f"/api/v1/complaints/track/{sub_one['tracking_code']}").status_code == 404
     assert (
         api_client.patch(
             f"/api/v1/complaints/{sub_one['id']}/status",
-            headers=citizen_headers,
-            json={"status": "EN_ATENCION_CEMZOO"},
+            headers=admin_headers,
+            json={"status": "ENVIADA"},
         ).status_code
-        == 403
+        in {404, 405}
     )
 
-    institutional_all = api_client.get("/api/v1/complaints", headers=cemzoo_headers)
+    assert api_client.get("/api/v1/complaints", headers=citizen_headers).status_code == 403
+    assert api_client.get("/api/v1/complaints/stats", headers=citizen_headers).status_code == 403
+
+    institutional_all = api_client.get("/api/v1/complaints", headers=admin_headers)
     assert institutional_all.status_code == 200
     returned_ids = {item["id"] for item in institutional_all.json()}
     assert returned_ids == {sub_one["id"], sub_two["id"]}
@@ -769,54 +861,45 @@ def test_public_tracking_institutional_workflow_and_sequential_codes(
 
     filtered_bio = api_client.get(
         "/api/v1/complaints",
-        headers=cemzoo_headers,
-        params={"status": "ENVIADA", "main_type": "BIOCIDIO"},
+        headers=admin_headers,
+        params={"main_type": "BIOCIDIO"},
     )
     assert filtered_bio.status_code == 200
     assert [item["id"] for item in filtered_bio.json()] == [sub_two["id"]]
 
-    draft_transition = api_client.patch(
-        f"/api/v1/complaints/{draft_pending['id']}/status",
-        headers=cemzoo_headers,
-        json={"status": "EN_ATENCION_CEMZOO"},
+    filtered_search = api_client.get(
+        "/api/v1/complaints",
+        headers=admin_headers,
+        params={"search": "americas", "category_id": maltrato_id},
     )
-    assert draft_transition.status_code == 409
+    assert filtered_search.status_code == 200
+    assert [item["id"] for item in filtered_search.json()] == [sub_one["id"]]
 
-    step_one = api_client.patch(
-        f"/api/v1/complaints/{sub_one['id']}/status",
-        headers=cemzoo_headers,
-        json={"status": "EN_ATENCION_CEMZOO"},
-    )
-    assert step_one.status_code == 200
-    assert step_one.json()["status"] == "EN_ATENCION_CEMZOO"
+    stats_resp = api_client.get("/api/v1/complaints/stats", headers=admin_headers)
+    assert stats_resp.status_code == 200
+    stats = stats_resp.json()
+    assert stats["total_submitted"] == 2
+    assert stats["total_maltrato"] == 1
+    assert stats["total_biocidio"] == 1
+    assert stats["total_with_coordinates"] == 1
+    assert stats["total_photos"] == 3
+    assert {item["category_id"]: item["count"] for item in stats["by_category"]} == {
+        maltrato_id: 1,
+        biocidio_id: 1,
+    }
 
-    step_two = api_client.patch(
-        f"/api/v1/complaints/{sub_one['id']}/status",
-        headers=cemzoo_headers,
-        json={"status": "CERRADA"},
-    )
-    assert step_two.status_code == 200
-    assert step_two.json()["status"] == "CERRADA"
-
-    invalid_reopen = api_client.patch(
-        f"/api/v1/complaints/{sub_one['id']}/status",
-        headers=cemzoo_headers,
-        json={"status": "EN_ATENCION_CEMZOO"},
-    )
-    assert invalid_reopen.status_code == 409
-
-    cemzoo_pdf = api_client.get(
+    admin_pdf = api_client.get(
         f"/api/v1/complaints/{sub_one['id']}/pdf",
-        headers=cemzoo_headers,
+        headers=admin_headers,
     )
-    assert cemzoo_pdf.status_code == 200
+    assert admin_pdf.status_code == 200
 
 
 def test_render_pdf_passes_restricted_url_fetcher_and_strict_staging_errors(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """WeasyPrint invocation disables URL fetching, and staging rejects missing libs with 500."""
+    """WeasyPrint blocks SSRF URLs while embedding allowed base64 image data URIs."""
     complaints_service.ensure_offense_categories_seeded(db_session)
     category = db_session.exec(select(OffenseCategory)).first()
     assert category is not None
@@ -840,6 +923,26 @@ def test_render_pdf_passes_restricted_url_fetcher_and_strict_staging_errors(
     assert isinstance(complaint.id, UUID)
     assert category.main_type in {OffenseMainType.MALTRATO, OffenseMainType.BIOCIDIO}
 
+    photo_key = f"evidences/{uuid4()}.png"
+    png_bytes = b"\x89PNG\r\n\x1a\nfake-png-content"
+    s3 = StubS3Client()
+    _seed_evidence_in_s3(
+        s3,
+        object_key=photo_key,
+        mime_type="image/png",
+        body=png_bytes,
+    )
+    ev = ComplaintEvidence(
+        complaint_id=complaint.id,
+        evidence_type=EvidenceType.FOTO,
+        object_key=photo_key,
+        mime_type="image/png",
+        file_size_bytes=len(png_bytes),
+    )
+    db_session.add(ev)
+    db_session.commit()
+    db_session.refresh(complaint)
+
     captured: dict[str, Any] = {}
 
     class FakeHTML:
@@ -855,16 +958,59 @@ def test_render_pdf_passes_restricted_url_fetcher_and_strict_staging_errors(
         session=db_session,
         complaint=complaint,
         owner=user,
+        s3_client=s3,
     )
     assert rendered.startswith(b"%PDF-1.4")
     assert "DOCUMENTO DE DENUNCIA" in captured["string"]
+    assert "VI. Anexo Fotográfico" in captured["string"]
+    expected_b64 = base64.b64encode(png_bytes).decode("ascii")
+    assert f"data:image/png;base64,{expected_b64}" in captured["string"]
     assert "memorial" not in captured["string"].lower()
     assert captured["url_fetcher"] is complaints_service._restricted_url_fetcher
     assert captured["url_fetcher"]._fail_on_errors is False
     assert "white-space: pre-wrap" in captured["string"]
 
-    with pytest.raises(ValueError, match="disabled"):
-        captured["url_fetcher"]("https://attacker.example/ssrf.png")
+    for blocked_url in (
+        "https://attacker.example/ssrf.png",
+        "file:///etc/passwd",
+        "data:text/html,<script>alert(1)</script>",
+        "data:image/svg+xml;base64,PHN2Zz4=",
+    ):
+        with pytest.raises(ValueError, match="disabled"):
+            captured["url_fetcher"](blocked_url)
+
+    fetcher_calls: list[dict[str, Any]] = []
+
+    class FakeURLFetcher:
+        def __init__(self, *, allowed_protocols: set[str], fail_on_errors: bool) -> None:
+            self.allowed_protocols = allowed_protocols
+            self.fail_on_errors = fail_on_errors
+
+        def fetch(self, url: str) -> dict[str, Any]:
+            fetcher_calls.append(
+                {
+                    "allowed_protocols": self.allowed_protocols,
+                    "fail_on_errors": self.fail_on_errors,
+                    "url": url,
+                }
+            )
+            return {"mime_type": "image/png"}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "weasyprint.urls",
+        SimpleNamespace(URLFetcher=FakeURLFetcher),
+    )
+    data_uri = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}"
+    fetched = captured["url_fetcher"](data_uri)
+    assert fetched == {"mime_type": "image/png"}
+    assert fetcher_calls == [
+        {
+            "allowed_protocols": {"data"},
+            "fail_on_errors": False,
+            "url": data_uri,
+        }
+    ]
 
     class MissingLibHTML:
         def __init__(self, *, string: str, url_fetcher: Any) -> None:
@@ -875,11 +1021,13 @@ def test_render_pdf_passes_restricted_url_fetcher_and_strict_staging_errors(
         session=db_session,
         complaint=complaint,
         owner=user,
+        s3_client=s3,
     )
     assert fallback_pdf.startswith(b"%PDF-1.4")
     assert fallback_pdf.endswith(b"%%EOF\n")
     fallback_text = fallback_pdf.decode("latin-1", "replace")
     assert "350 bis" in fallback_text
+    assert "ANEXO FOTOGRAFICO" in fallback_text
     assert "Descripcion formal suficiente para generar el documento PDF." in fallback_text
 
     class DiskFailureHTML:
@@ -915,14 +1063,15 @@ def test_render_pdf_passes_restricted_url_fetcher_and_strict_staging_errors(
 def test_multiline_description_padding_rejected_and_lists_paginated(
     api_client: TestClient,
     db_session: Session,
+    internal_s3: StubS3Client,
 ) -> None:
     """Reject whitespace/newline-padded short descriptions and paginate list endpoints."""
     categories = api_client.get("/api/v1/complaints/categories").json()
     category_id = categories[0]["id"]
     citizen = _create_user(db_session, email="pagination@example.com")
-    cemzoo = _create_user(db_session, email="cemzoo-pag@example.com", role=UserRole.GESTOR_CEMZOO)
+    admin = _create_user(db_session, email="admin-pag@example.com", role=UserRole.ADMIN)
     c_headers = _auth_headers(citizen)
-    z_headers = _auth_headers(cemzoo)
+    a_headers = _auth_headers(admin)
 
     padded_desc = api_client.post(
         "/api/v1/complaints",
@@ -943,6 +1092,7 @@ def test_multiline_description_padding_rejected_and_lists_paginated(
             category_id,
             address=f"Calle Paginacion {idx + 10}",
         )
+        _attach_photo_via_api(api_client, c_headers, internal_s3, created["id"])
         submitted = api_client.post(f"/api/v1/complaints/{created['id']}/submit", headers=c_headers)
         assert submitted.status_code == 200
 
@@ -956,18 +1106,18 @@ def test_multiline_description_padding_rejected_and_lists_paginated(
 
     page_admin = api_client.get(
         "/api/v1/complaints",
-        headers=z_headers,
+        headers=a_headers,
         params={"limit": 1, "offset": 2},
     )
     assert page_admin.status_code == 200
     assert len(page_admin.json()) == 1
 
 
-def test_submit_and_status_transitions_resist_concurrent_race_conditions(
+def test_submit_resists_concurrent_race_conditions(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Concurrent double-submit and status regression (CERRADA -> EN_ATENCION) fail with 409."""
+    """Concurrent double-submit and correlative code retry guarantee single immutable emission."""
     db_file = tmp_path / "race.db"
     engine = create_engine(
         f"sqlite:///{db_file}",
@@ -998,11 +1148,23 @@ def test_submit_and_status_transitions_resist_concurrent_race_conditions(
                 offense_category_id=cat_id,
                 incident_date=datetime.now(UTC) - timedelta(hours=1),
                 incident_address="Plaza 25 de Mayo 100",
-                description="Relato valido para prueba de concurrencia en envio y cierre.",
+                description="Relato valido para prueba de concurrencia en envio y correlativo.",
             ),
         )
         draft_id = draft.id
         citizen_id = citizen.id
+        photo_one = f"evidences/{uuid4()}.jpg"
+        _seed_evidence_in_s3(s3, object_key=photo_one, mime_type="image/jpeg", body=b"jpg-one")
+        session.add(
+            ComplaintEvidence(
+                complaint_id=draft_id,
+                evidence_type=EvidenceType.FOTO,
+                object_key=photo_one,
+                mime_type="image/jpeg",
+                file_size_bytes=7,
+            )
+        )
+        session.commit()
 
     barrier = threading.Barrier(2)
     submit_outcomes: list[tuple[str, Any]] = []
@@ -1031,58 +1193,8 @@ def test_submit_and_status_transitions_resist_concurrent_race_conditions(
     t2.join(timeout=10)
 
     assert sorted(submit_outcomes) == [("ERR", 409), ("OK", f"SOS-000001-{datetime.now(UTC).year}")]
-    assert len(s3.uploaded_objects) == 1
-
-    # Verify concurrent status transition cannot reopen CERRADA back to EN_ATENCION_CEMZOO
-    orig_get = complaints_service._get_complaint_or_404
-    paused = threading.Event()
-    resume = threading.Event()
-
-    def slow_first_get(
-        session: Session,
-        complaint_id: UUID,
-        *,
-        lock_for_update: bool = False,
-    ) -> Complaint:
-        obj = orig_get(session, complaint_id, lock_for_update=lock_for_update)
-        if lock_for_update and not paused.is_set():
-            paused.set()
-            resume.wait(timeout=5)
-        return obj
-
-    monkeypatch.setattr(complaints_service, "_get_complaint_or_404", slow_first_get)
-    status_outcomes: dict[str, tuple[str, Any]] = {}
-
-    def run_reopen() -> None:
-        with Session(engine) as session:
-            try:
-                res = complaints_service.update_complaint_status(
-                    session=session,
-                    complaint_id=draft_id,
-                    new_status=ComplaintStatus.EN_ATENCION_CEMZOO,
-                )
-                status_outcomes["open"] = ("OK", res.status.value)
-            except HTTPException as exc:
-                status_outcomes["open"] = ("ERR", exc.status_code)
-
-    ta = threading.Thread(target=run_reopen)
-    ta.start()
-    assert paused.wait(timeout=5)
-    with Session(engine) as session:
-        closed = complaints_service.update_complaint_status(
-            session=session,
-            complaint_id=draft_id,
-            new_status=ComplaintStatus.CERRADA,
-        )
-        assert closed.status == ComplaintStatus.CERRADA
-    resume.set()
-    ta.join(timeout=10)
-
-    assert status_outcomes["open"] == ("ERR", 409)
-    with Session(engine) as session:
-        final_row = session.get(Complaint, draft_id)
-        assert final_row is not None
-        assert final_row.status == ComplaintStatus.CERRADA
+    expected_key = f"complaints/{draft_id}/SOS-000001-{datetime.now(UTC).year}.pdf"
+    assert ("sos-documents", expected_key) in s3.uploaded_objects
 
     # Verify IntegrityError collision retry skips taken code without uploading orphan PDFs
     with Session(engine) as session:
@@ -1101,6 +1213,18 @@ def test_submit_and_status_transitions_resist_concurrent_race_conditions(
             ),
         )
         second_id = second_draft.id
+        photo_two = f"evidences/{uuid4()}.png"
+        _seed_evidence_in_s3(s3, object_key=photo_two, mime_type="image/png", body=b"png-two")
+        session.add(
+            ComplaintEvidence(
+                complaint_id=second_id,
+                evidence_type=EvidenceType.FOTO,
+                object_key=photo_two,
+                mime_type="image/png",
+                file_size_bytes=7,
+            )
+        )
+        session.commit()
 
     call_count = {"n": 0}
     orig_next_seq = complaints_service._next_tracking_sequence

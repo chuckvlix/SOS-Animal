@@ -1,4 +1,4 @@
-"""HTTP endpoints for offense catalog, draft complaints, submission, PDFs, and tracking."""
+"""HTTP endpoints for offense catalog, draft complaints, photo annex PDFs, and admin stats."""
 
 import uuid
 from typing import Annotated
@@ -15,23 +15,22 @@ from app.core.storage import (
 )
 from app.modules.auth.models import User, UserRole
 from app.modules.complaints import service
-from app.modules.complaints.models import ComplaintStatus, OffenseMainType
+from app.modules.complaints.models import OffenseMainType
 from app.modules.complaints.schemas import (
     ComplaintCreateRequest,
     ComplaintDownloadUrlResponse,
     ComplaintEvidenceCreateRequest,
     ComplaintEvidenceRead,
     ComplaintPreviewResponse,
-    ComplaintPublicTrackingRead,
     ComplaintRead,
-    ComplaintStatusUpdateRequest,
+    ComplaintStatsRead,
     ComplaintUpdateRequest,
     OffenseCategoryRead,
 )
 
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
 
-ManagerUser = Annotated[User, Depends(require_role([UserRole.ADMIN, UserRole.GESTOR_CEMZOO]))]
+AdminUser = Annotated[User, Depends(require_role([UserRole.ADMIN]))]
 PublicS3Client = Annotated[S3ClientProtocol, Depends(get_s3_client)]
 InternalS3Client = Annotated[S3DocumentClientProtocol, Depends(get_internal_s3_client)]
 
@@ -44,15 +43,6 @@ def list_categories(
     """Return the statutory Maltrato and Biocidio offense catalog."""
     categories = service.list_offense_categories(session=session, main_type=main_type)
     return [OffenseCategoryRead.model_validate(category) for category in categories]
-
-
-@router.get("/track/{tracking_code}", response_model=ComplaintPublicTrackingRead)
-def track_complaint_public(
-    tracking_code: str,
-    session: SessionDep,
-) -> ComplaintPublicTrackingRead:
-    """Return privacy-safe public status tracking for a submitted complaint."""
-    return service.get_public_tracking(session=session, tracking_code=tracking_code)
 
 
 @router.get("/me", response_model=list[ComplaintRead])
@@ -72,20 +62,31 @@ def list_my_complaints(
     return [ComplaintRead.model_validate(complaint) for complaint in complaints]
 
 
+@router.get("/stats", response_model=ComplaintStatsRead)
+def get_complaint_stats(
+    _admin_user: AdminUser,
+    session: SessionDep,
+) -> ComplaintStatsRead:
+    """Return historical complaint statistics for the University admin panel."""
+    return service.get_institutional_complaint_stats(session=session)
+
+
 @router.get("", response_model=list[ComplaintRead])
 def list_institutional_complaints(
-    _manager_user: ManagerUser,
+    _admin_user: AdminUser,
     session: SessionDep,
-    status_filter: Annotated[ComplaintStatus | None, Query(alias="status")] = None,
     main_type: OffenseMainType | None = None,
+    category_id: Annotated[int | None, Query(ge=1)] = None,
+    search: Annotated[str | None, Query(max_length=120)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ComplaintRead]:
-    """List immutable submitted complaints for CEMZOO and administrator triage."""
+    """List immutable submitted complaints for the University historical registry."""
     complaints = service.list_institutional_complaints(
         session=session,
-        status_filter=status_filter,
         main_type=main_type,
+        category_id=category_id,
+        search=search,
         limit=limit,
         offset=offset,
     )
@@ -201,12 +202,14 @@ def preview_complaint_document(
     complaint_id: uuid.UUID,
     current_user: CurrentUser,
     session: SessionDep,
+    s3_client: InternalS3Client,
 ) -> ComplaintPreviewResponse:
-    """Render Step 6 HTML preview of the Documento de Denuncia."""
+    """Render Step 3 HTML preview of the Documento de Denuncia with photo annex."""
     complaint, html_preview = service.get_complaint_preview(
         session=session,
         current_user=current_user,
         complaint_id=complaint_id,
+        s3_client=s3_client,
     )
     return ComplaintPreviewResponse(complaint_id=complaint.id, html_preview=html_preview)
 
@@ -247,19 +250,3 @@ def download_complaint_pdf(
         object_key=result.object_key,
         expires_in_seconds=result.expires_in_seconds,
     )
-
-
-@router.patch("/{complaint_id}/status", response_model=ComplaintRead)
-def change_complaint_status(
-    complaint_id: uuid.UUID,
-    payload: ComplaintStatusUpdateRequest,
-    _manager_user: ManagerUser,
-    session: SessionDep,
-) -> ComplaintRead:
-    """Transition a submitted complaint status inside CEMZOO/Admin workflow."""
-    complaint = service.update_complaint_status(
-        session=session,
-        complaint_id=complaint_id,
-        new_status=payload.status,
-    )
-    return ComplaintRead.model_validate(complaint)

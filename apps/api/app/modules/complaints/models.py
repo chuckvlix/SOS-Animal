@@ -20,16 +20,12 @@ class ComplaintStatus(StrEnum):
 
     BORRADOR = "BORRADOR"
     ENVIADA = "ENVIADA"
-    EN_ATENCION_CEMZOO = "EN_ATENCION_CEMZOO"
-    CERRADA = "CERRADA"
 
 
 class EvidenceType(StrEnum):
-    """Supported attachment categories for complaint evidence."""
+    """Supported attachment category for the PDF photographic annex."""
 
     FOTO = "FOTO"
-    VIDEO = "VIDEO"
-    DOCUMENTO = "DOCUMENTO"
 
 
 class OffenseCategory(SQLModel, table=True):

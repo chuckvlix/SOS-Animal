@@ -55,15 +55,9 @@ const currentPath = Astro.url.pathname;
             window.location.replace(nextUrl);
             return;
           }
-          if (
-            activePayload.role === "ciudadano" ||
-            (activePayload.role !== "gestor_cemzoo" && activePayload.role !== "admin")
-          ) {
+          if (activePayload.role !== "admin") {
             window.location.replace("/");
             return;
-          }
-          if (requireAdmin && activePayload.role !== "admin") {
-            window.location.replace("/panel/denuncias");
           }
         } catch {
           window.location.replace("/login");

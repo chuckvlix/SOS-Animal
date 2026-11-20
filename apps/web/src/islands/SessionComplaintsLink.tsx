@@ -78,8 +78,8 @@ export default function SessionComplaintsLink({
 
   const complaintsActive = isActiveRoute(currentPath, AUTH_COMPLAINTS_NAV_ITEM.href);
   const panelActive = isActiveRoute(currentPath, "/panel");
-  const isStaff = role === "gestor_cemzoo" || role === "admin";
-  const panelLabel = role === "admin" ? "Panel Admin" : "Panel CEMZOO";
+  const isStaff = role === "admin";
+  const panelLabel = "Panel Admin";
 
   return (
     <div

@@ -15,7 +15,7 @@ from app.modules.complaints.models import ComplaintStatus, EvidenceType, Offense
 
 EVIDENCE_OBJECT_KEY_PATTERN = re.compile(
     r"^evidences/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
-    r"\.(jpg|png|webp|mp4|pdf)$"
+    r"\.(jpg|png|webp)$"
 )
 TRACKING_CODE_PATTERN = re.compile(r"^SOS-[0-9]{6}-[0-9]{4}$")
 
@@ -200,11 +200,11 @@ class ComplaintUpdateRequest(BaseModel):
 
 
 class ComplaintEvidenceCreateRequest(BaseModel):
-    """Metadata payload linking an uploaded MinIO evidence object to a draft complaint."""
+    """Metadata payload linking an uploaded MinIO photo to a draft complaint."""
 
     model_config = ConfigDict(extra="forbid")
 
-    evidence_type: EvidenceType
+    evidence_type: EvidenceType = EvidenceType.FOTO
     object_key: str = Field(min_length=20, max_length=500)
     mime_type: str = Field(min_length=3, max_length=100)
     file_size_bytes: StrictInt = Field(gt=0)
@@ -288,22 +288,21 @@ class ComplaintDownloadUrlResponse(BaseModel):
     expires_in_seconds: int
 
 
-class ComplaintPublicTrackingRead(BaseModel):
-    """Privacy-safe public status lookup response omitting citizen PII and exact address."""
+class ComplaintCategoryStat(BaseModel):
+    """Submitted complaint count grouped by offense category."""
 
-    tracking_code: str
-    status: ComplaintStatus
+    category_id: int
     main_type: OffenseMainType
     subtype_name: str
-    legal_basis: str
-    incident_date: datetime
-    created_at: datetime
-    submitted_at: datetime
+    count: int
 
 
-class ComplaintStatusUpdateRequest(BaseModel):
-    """CEMZOO/Admin institutional status transition payload."""
+class ComplaintStatsRead(BaseModel):
+    """Historical and statistical summary for the University admin panel."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal[ComplaintStatus.EN_ATENCION_CEMZOO, ComplaintStatus.CERRADA]
+    total_submitted: int
+    total_maltrato: int
+    total_biocidio: int
+    total_with_coordinates: int
+    total_photos: int
+    by_category: list[ComplaintCategoryStat]

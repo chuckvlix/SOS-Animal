@@ -111,12 +111,8 @@ export default function AdminUsersIsland() {
           if (isCancelled?.()) {
             return;
           }
-          if (me.role === "ciudadano") {
-            window.location.replace("/");
-            return;
-          }
           if (me.role !== "admin") {
-            window.location.replace("/panel/denuncias");
+            window.location.replace("/");
             return;
           }
           setAuthorizedAdmin(me);
@@ -336,7 +332,6 @@ export default function AdminUsersIsland() {
               >
                 <option value="">Todos los roles</option>
                 <option value="ciudadano">Ciudadano</option>
-                <option value="gestor_cemzoo">Gestor CEMZOO</option>
                 <option value="admin">Administrador</option>
               </select>
             </div>
@@ -494,7 +489,6 @@ export default function AdminUsersIsland() {
                             className="rounded-lg border border-border bg-bg-surface px-2.5 py-1.5 text-xs font-medium text-text-primary"
                           >
                             <option value="ciudadano">Ciudadano</option>
-                            <option value="gestor_cemzoo">Gestor CEMZOO</option>
                             <option value="admin">Administrador</option>
                           </select>
 

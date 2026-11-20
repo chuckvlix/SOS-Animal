@@ -6,13 +6,13 @@ import type {
 import { apiRequest } from "./api";
 
 export const MAX_EVIDENCE_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+export const MIN_PHOTOS_PER_COMPLAINT = 1;
+export const MAX_PHOTOS_PER_COMPLAINT = 3;
 
 export const ALLOWED_EVIDENCE_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
-  "video/mp4",
-  "application/pdf",
 ] as const;
 
 export type AllowedEvidenceMimeType = (typeof ALLOWED_EVIDENCE_MIME_TYPES)[number];
@@ -22,8 +22,6 @@ const EXTENSION_MIME_FALLBACK: Record<string, AllowedEvidenceMimeType> = {
   ".jpeg": "image/jpeg",
   ".png": "image/png",
   ".webp": "image/webp",
-  ".mp4": "video/mp4",
-  ".pdf": "application/pdf",
 };
 
 export function resolveAllowedEvidenceMimeType(file: File): AllowedEvidenceMimeType | null {
@@ -47,19 +45,19 @@ export function validateEvidenceFile(file: File): {
   sizeBytes: number;
 } {
   if (file.size <= 0) {
-    throw new Error(`El archivo "${file.name}" está vacío.`);
+    throw new Error(`La fotografía "${file.name}" está vacía.`);
   }
 
   if (file.size > MAX_EVIDENCE_FILE_SIZE_BYTES) {
     throw new Error(
-      `El archivo "${file.name}" supera el límite máximo permitido de 25 MB.`,
+      `La fotografía "${file.name}" supera el límite máximo permitido de 25 MB.`,
     );
   }
 
   const mimeType = resolveAllowedEvidenceMimeType(file);
   if (!mimeType) {
     throw new Error(
-      `Formato no permitido para "${file.name}". Usa JPG, PNG, WEBP, MP4 o PDF.`,
+      `Formato no permitido para "${file.name}". Solo se aceptan fotografías JPG, PNG o WEBP.`,
     );
   }
 
@@ -69,14 +67,7 @@ export function validateEvidenceFile(file: File): {
   };
 }
 
-export function inferEvidenceType(mimeType: string): EvidenceType {
-  const normalized = mimeType.trim().toLowerCase();
-  if (normalized.startsWith("video/")) {
-    return "VIDEO";
-  }
-  if (normalized === "application/pdf") {
-    return "DOCUMENTO";
-  }
+export function inferEvidenceType(): EvidenceType {
   return "FOTO";
 }
 

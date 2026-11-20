@@ -42,7 +42,7 @@ import "../../styles/global.css";
             window.location.replace("/login?next=%2Fpanel%2Fdenuncias");
             return;
           }
-          if (activePayload.role === "gestor_cemzoo" || activePayload.role === "admin") {
+          if (activePayload.role === "admin") {
             window.location.replace("/panel/denuncias");
           } else {
             window.location.replace("/");

@@ -90,7 +90,7 @@ function SidebarNavContent({
               SOS Animal
             </span>
             <span className="block text-[11px] font-semibold uppercase tracking-wide text-secondary-text">
-              Panel Institucional
+              Panel Universitario
             </span>
           </div>
         </a>
@@ -101,14 +101,14 @@ function SidebarNavContent({
           </span>
           <span className="inline-flex items-center gap-1 rounded-full bg-secondary-soft px-2.5 py-0.5 text-[11px] font-semibold text-secondary-text">
             <ShieldCheck aria-hidden="true" className="h-3 w-3" />
-            <span>{isAdmin ? "Superusuario" : "Gestor CEMZOO"}</span>
+            <span>{isAdmin ? "Superusuario" : "Administrador"}</span>
           </span>
         </div>
       </div>
 
       <nav aria-label="Menú institucional" className="flex-1 overflow-y-auto px-3 py-4">
         <p className="mt-0 mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-          Gestión Operativa
+          Observatorio Histórico
         </p>
         <ul className="m-0 list-none space-y-1 p-0">
           <li>
@@ -124,7 +124,7 @@ function SidebarNavContent({
               ].join(" ")}
             >
               <ClipboardList aria-hidden="true" className="h-4 w-4 shrink-0" />
-              <span>Bandeja de Denuncias</span>
+              <span>Registro de Denuncias</span>
             </a>
           </li>
 
@@ -211,12 +211,12 @@ export default function PanelHeaderIsland({
           if (isCancelled?.()) {
             return;
           }
-          if (me.role === "ciudadano") {
+          if (me.role !== "admin") {
             window.location.replace("/");
             return;
           }
           if (requireAdmin && me.role !== "admin") {
-            window.location.replace("/panel/denuncias");
+            window.location.replace("/");
             return;
           }
           setUser(me);
@@ -324,7 +324,9 @@ export default function PanelHeaderIsland({
   const isAdmin = user.role === "admin";
   const complaintsActive = isActiveRoute(currentPath, "/panel/denuncias");
   const usersActive = isActiveRoute(currentPath, "/panel/usuarios");
-  const activeSectionTitle = usersActive ? "Gestión de Usuarios y Roles" : "Bandeja de Denuncias";
+  const activeSectionTitle = usersActive
+    ? "Gestión de Usuarios y Roles"
+    : "Registro Histórico y Estadístico";
 
   return (
     <>

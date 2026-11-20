@@ -2,20 +2,23 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Camera,
   Check,
   CheckCircle2,
+  ChevronDown,
   Copy,
   Download,
   FileText,
   Info,
   Lock,
+  MapPin,
   Save,
   Scale,
   ShieldAlert,
   Trash2,
   Upload,
 } from "lucide-react";
-import { type ChangeEvent, type SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../services/api";
 import {
   clearStoredAccessToken,
@@ -43,6 +46,8 @@ import {
   updateDraftComplaint,
 } from "../services/complaints";
 import {
+  MAX_PHOTOS_PER_COMPLAINT,
+  MIN_PHOTOS_PER_COMPLAINT,
   formatFileSize,
   inferEvidenceType,
   requestPresignedUpload,
@@ -68,31 +73,22 @@ interface UploadItemState {
   errorMessage?: string;
 }
 
-type Step5FieldKey =
-  | "fullName"
-  | "ciNumber"
-  | "phone"
-  | "domicileAddress"
-  | "incidentDateLocal"
-  | "incidentAddress"
-  | "description";
-
-type Step5FieldErrors = Partial<Record<Step5FieldKey, string>>;
+type FactFieldKey = "incidentDateLocal" | "incidentAddress" | "description";
+type ProfileFieldKey = "fullName" | "ciNumber" | "phone" | "domicileAddress";
+type WizardFieldKey = FactFieldKey | ProfileFieldKey;
+type WizardFieldErrors = Partial<Record<WizardFieldKey, string>>;
 
 const STEP_LABELS = [
-  "1. Inicio",
-  "2. Tipo",
-  "3. Modalidad",
-  "4. Fundamento",
-  "5. Datos",
-  "6. Revisión",
-  "7. Envío",
+  "1. Tipificación",
+  "2. Hechos y Fotos",
+  "3. Tus Datos y Revisión",
+  "4. Descarga de PDF",
 ] as const;
 
 const CI_REGEX = /^[A-Za-z0-9]+(?:[ -][A-Za-z0-9]+)*$/;
 const PHONE_REGEX = /^\+?[0-9]+(?:[ -][0-9]+)*$/;
 
-const DESTINATARIO_INSTITUTIONS = [
+const RECEIVER_INSTITUTIONS = [
   "Ministerio Público (Fiscalía de Materia)",
   "Policía Boliviana — POFOMA",
   "Centro Municipal de Zoonosis de Sucre (CEMZOO)",
@@ -110,46 +106,138 @@ function countDigits(value: string): number {
 }
 
 function redirectToLoginWithNext(): void {
-  const current = `${window.location.pathname}${window.location.search}`;
-  const safeNext = current.startsWith("/denunciar") ? current : "/denunciar";
-  window.location.replace(`/login?next=${encodeURIComponent(safeNext)}`);
+  const nextPath = window.location.pathname + window.location.search;
+  window.location.replace(`/login?next=${encodeURIComponent(nextPath)}`);
+}
+
+function validateFieldValue(field: WizardFieldKey, rawValue: string): string | undefined {
+  switch (field) {
+    case "incidentDateLocal": {
+      if (!rawValue) {
+        return "Indica la fecha y hora aproximada en que ocurrió el hecho.";
+      }
+      const parsedDate = new Date(rawValue);
+      if (Number.isNaN(parsedDate.getTime())) {
+        return "La fecha y hora del hecho no es válida.";
+      }
+      if (parsedDate.getTime() > Date.now()) {
+        return "La fecha y hora del hecho no puede estar en el futuro.";
+      }
+      return undefined;
+    }
+    case "incidentAddress": {
+      const cleanIncidentAddress = rawValue.trim();
+      const meaningfulAddress = cleanIncidentAddress.replace(/\s+/g, " ");
+      if (
+        meaningfulAddress.length < 5 ||
+        cleanIncidentAddress.length > 255 ||
+        cleanIncidentAddress.includes("<") ||
+        cleanIncidentAddress.includes(">")
+      ) {
+        return "Describe el lugar del hecho (entre 5 y 255 caracteres sin '<' ni '>').";
+      }
+      return undefined;
+    }
+    case "description": {
+      const cleanDescription = rawValue.trim();
+      const meaningfulDescription = cleanDescription.replace(/\s+/g, " ");
+      if (
+        meaningfulDescription.length < 10 ||
+        cleanDescription.length > 5000 ||
+        cleanDescription.includes("<") ||
+        cleanDescription.includes(">")
+      ) {
+        return "El relato de los hechos debe tener al menos 10 caracteres útiles (máximo 5000) y sin '<' ni '>'.";
+      }
+      return undefined;
+    }
+    case "fullName": {
+      const cleanName = rawValue.trim();
+      if (
+        cleanName.length < 2 ||
+        cleanName.length > 150 ||
+        cleanName.includes("<") ||
+        cleanName.includes(">")
+      ) {
+        return "El nombre completo debe tener entre 2 y 150 caracteres y no incluir '<' ni '>'.";
+      }
+      return undefined;
+    }
+    case "ciNumber": {
+      const cleanCi = rawValue.trim();
+      if (
+        cleanCi.length < 4 ||
+        cleanCi.length > 30 ||
+        !CI_REGEX.test(cleanCi) ||
+        countDigits(cleanCi) < 4
+      ) {
+        return "Ingresa un C.I. válido (mínimo 4 dígitos, ejemplo: 7482910 CH).";
+      }
+      return undefined;
+    }
+    case "phone": {
+      const cleanPhone = rawValue.trim();
+      if (
+        cleanPhone.length < 6 ||
+        cleanPhone.length > 30 ||
+        !PHONE_REGEX.test(cleanPhone) ||
+        countDigits(cleanPhone) < 6
+      ) {
+        return "Ingresa un teléfono válido (mínimo 6 dígitos, ejemplo: +591 71234567).";
+      }
+      return undefined;
+    }
+    case "domicileAddress": {
+      const cleanDomicile = rawValue.trim();
+      if (
+        cleanDomicile.length < 5 ||
+        cleanDomicile.length > 255 ||
+        cleanDomicile.includes("<") ||
+        cleanDomicile.includes(">")
+      ) {
+        return "Ingresa tu domicilio real completo (entre 5 y 255 caracteres).";
+      }
+      return undefined;
+    }
+  }
 }
 
 export default function ComplaintWizardIsland() {
   const [initializing, setInitializing] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [currentUser, setCurrentUser] = useState<UserRead | null>(null);
-  const [categories, setCategories] = useState<OffenseCategoryRead[]>([]);
-  const [alreadySubmittedView, setAlreadySubmittedView] = useState<ComplaintRead | null>(null);
   const [draftWarning, setDraftWarning] = useState<string | null>(null);
 
-  const [step, setStep] = useState<number>(1);
-  const [confirmedStart, setConfirmedStart] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<UserRead | null>(null);
+  const [categories, setCategories] = useState<OffenseCategoryRead[]>([]);
+
+  const [step, setStep] = useState(1);
   const [selectedMainType, setSelectedMainType] = useState<OffenseMainType | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+
+  const [incidentDateLocal, setIncidentDateLocal] = useState(getCurrentLocalDateTimeInputValue);
+  const [incidentAddress, setIncidentAddress] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [description, setDescription] = useState("");
 
   const [fullName, setFullName] = useState("");
   const [ciNumber, setCiNumber] = useState("");
   const [phone, setPhone] = useState("");
   const [domicileAddress, setDomicileAddress] = useState("");
 
-  const [incidentDateLocal, setIncidentDateLocal] = useState(() =>
-    getCurrentLocalDateTimeInputValue(),
-  );
-  const [incidentAddress, setIncidentAddress] = useState("");
-  const [latitude, setLatitude] = useState<number | null>(null);
-  const [longitude, setLongitude] = useState<number | null>(null);
-  const [description, setDescription] = useState("");
-
   const [draftComplaint, setDraftComplaint] = useState<ComplaintRead | null>(null);
+  const [alreadySubmittedView, setAlreadySubmittedView] = useState<ComplaintRead | null>(null);
   const [evidences, setEvidences] = useState<ComplaintEvidenceRead[]>([]);
+  const [localThumbnails, setLocalThumbnails] = useState<Record<string, string>>({});
   const [uploadQueue, setUploadQueue] = useState<UploadItemState[]>([]);
   const [removingEvidenceId, setRemovingEvidenceId] = useState<string | null>(null);
 
   const [stepError, setStepError] = useState<string | null>(null);
-  const [step5FieldErrors, setStep5FieldErrors] = useState<Step5FieldErrors>({});
+  const [fieldErrors, setFieldErrors] = useState<WizardFieldErrors>({});
   const [stepStatusMessage, setStepStatusMessage] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [previewData, setPreviewData] = useState<ComplaintPreviewResponse | null>(null);
   const [submittingFinal, setSubmittingFinal] = useState(false);
@@ -160,16 +248,28 @@ export default function ComplaintWizardIsland() {
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
   const stepErrorRef = useRef<HTMLDivElement>(null);
   const confirmDialogRef = useRef<HTMLDialogElement>(null);
+  const cancelConfirmButtonRef = useRef<HTMLButtonElement>(null);
   const hasMovedStepRef = useRef(false);
   const draftSavePromiseRef = useRef<Promise<ComplaintRead | null> | null>(null);
+  const createdObjectUrlsRef = useRef<Set<string>>(new Set());
 
+  const incidentDateInputRef = useRef<HTMLInputElement>(null);
+  const incidentAddressInputRef = useRef<HTMLInputElement>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
   const fullNameInputRef = useRef<HTMLInputElement>(null);
   const ciInputRef = useRef<HTMLInputElement>(null);
   const phoneInputRef = useRef<HTMLInputElement>(null);
   const domicileInputRef = useRef<HTMLInputElement>(null);
-  const incidentDateInputRef = useRef<HTMLInputElement>(null);
-  const incidentAddressInputRef = useRef<HTMLInputElement>(null);
-  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const objectUrls = createdObjectUrlsRef.current;
+    return () => {
+      for (const url of objectUrls) {
+        URL.revokeObjectURL(url);
+      }
+      objectUrls.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isUserAuthenticated()) {
@@ -223,9 +323,10 @@ export default function ComplaintWizardIsland() {
             setIncidentAddress(loaded.incident_address);
             setLatitude(loaded.latitude);
             setLongitude(loaded.longitude);
+            setMapExpanded(loaded.latitude !== null && loaded.longitude !== null);
             setDescription(loaded.description);
-            setConfirmedStart(true);
-            setStep(5);
+            setStep(loaded.evidences.length >= MIN_PHOTOS_PER_COMPLAINT ? 3 : 2);
+            setDraftWarning("Borrador recuperado. Revisa los datos antes de emitir el Documento de Denuncia.");
           } catch (draftErr) {
             if (cancelled) {
               return;
@@ -273,6 +374,34 @@ export default function ComplaintWizardIsland() {
     stepHeadingRef.current?.focus();
   }, [step]);
 
+  const loadHtmlPreview = useCallback(async (complaintId: string): Promise<void> => {
+    setLoadingPreview(true);
+    setStepError(null);
+    try {
+      const preview = await fetchComplaintPreview(complaintId);
+      setPreviewData(preview);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearStoredAccessToken();
+        redirectToLoginWithNext();
+        return;
+      }
+      setStepError(
+        err instanceof Error && err.message
+          ? err.message
+          : "No pudimos generar la vista previa del Documento de Denuncia.",
+      );
+    } finally {
+      setLoadingPreview(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (step === 3 && draftComplaint && !previewData && !loadingPreview) {
+      void loadHtmlPreview(draftComplaint.id);
+    }
+  }, [step, draftComplaint, previewData, loadingPreview, loadHtmlPreview]);
+
   const filteredCategories = useMemo(() => {
     if (!selectedMainType) {
       return [];
@@ -287,109 +416,17 @@ export default function ComplaintWizardIsland() {
     return categories.find((item) => item.id === selectedCategoryId) ?? null;
   }, [categories, selectedCategoryId]);
 
-  const goToStep = (nextStep: number) => {
-    setStepError(null);
-    setStep5FieldErrors({});
-    setStepStatusMessage(null);
-    setStep(nextStep);
-  };
+  const isProfileComplete = useMemo(() => {
+    return (
+      !validateFieldValue("fullName", fullName) &&
+      !validateFieldValue("ciNumber", ciNumber) &&
+      !validateFieldValue("phone", phone) &&
+      !validateFieldValue("domicileAddress", domicileAddress)
+    );
+  }, [fullName, ciNumber, phone, domicileAddress]);
 
-  const focusStepError = () => {
-    window.requestAnimationFrame(() => {
-      stepErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      stepErrorRef.current?.focus({ preventScroll: true });
-    });
-  };
-
-  const validateSingleStep5Field = (field: Step5FieldKey, rawValue: string): string | undefined => {
-    switch (field) {
-      case "fullName": {
-        const cleanName = rawValue.trim();
-        if (cleanName.length < 2 || cleanName.length > 150 || cleanName.includes("<") || cleanName.includes(">")) {
-          return "El nombre completo debe tener entre 2 y 150 caracteres y no incluir '<' ni '>'.";
-        }
-        return undefined;
-      }
-      case "ciNumber": {
-        const cleanCi = rawValue.trim();
-        if (
-          cleanCi.length < 4 ||
-          cleanCi.length > 30 ||
-          !CI_REGEX.test(cleanCi) ||
-          countDigits(cleanCi) < 4
-        ) {
-          return "Ingresa un C.I. válido (mínimo 4 dígitos, ejemplo: 7482910 CH).";
-        }
-        return undefined;
-      }
-      case "phone": {
-        const cleanPhone = rawValue.trim();
-        if (
-          cleanPhone.length < 6 ||
-          cleanPhone.length > 30 ||
-          !PHONE_REGEX.test(cleanPhone) ||
-          countDigits(cleanPhone) < 6
-        ) {
-          return "Ingresa un teléfono válido (mínimo 6 dígitos, ejemplo: +591 71234567).";
-        }
-        return undefined;
-      }
-      case "domicileAddress": {
-        const cleanDomicile = rawValue.trim();
-        if (
-          cleanDomicile.length < 5 ||
-          cleanDomicile.length > 255 ||
-          cleanDomicile.includes("<") ||
-          cleanDomicile.includes(">")
-        ) {
-          return "Ingresa tu domicilio real completo (entre 5 y 255 caracteres).";
-        }
-        return undefined;
-      }
-      case "incidentDateLocal": {
-        if (!rawValue) {
-          return "Indica la fecha y hora aproximada en que ocurrió el hecho.";
-        }
-        const parsedDate = new Date(rawValue);
-        if (Number.isNaN(parsedDate.getTime())) {
-          return "La fecha y hora del hecho no es válida.";
-        }
-        if (parsedDate.getTime() > Date.now()) {
-          return "La fecha y hora del hecho no puede estar en el futuro.";
-        }
-        return undefined;
-      }
-      case "incidentAddress": {
-        const cleanIncidentAddress = rawValue.trim();
-        const meaningfulAddress = cleanIncidentAddress.replace(/\s+/g, " ");
-        if (
-          meaningfulAddress.length < 5 ||
-          cleanIncidentAddress.length > 255 ||
-          cleanIncidentAddress.includes("<") ||
-          cleanIncidentAddress.includes(">")
-        ) {
-          return "Describe el lugar del hecho (entre 5 y 255 caracteres sin '<' ni '>').";
-        }
-        return undefined;
-      }
-      case "description": {
-        const cleanDescription = rawValue.trim();
-        const meaningfulDescription = cleanDescription.replace(/\s+/g, " ");
-        if (
-          meaningfulDescription.length < 10 ||
-          cleanDescription.length > 5000 ||
-          cleanDescription.includes("<") ||
-          cleanDescription.includes(">")
-        ) {
-          return "El relato de los hechos debe tener al menos 10 caracteres útiles (máximo 5000) y sin '<' ni '>'.";
-        }
-        return undefined;
-      }
-    }
-  };
-
-  const clearStep5FieldError = (field: Step5FieldKey) => {
-    setStep5FieldErrors((prev) => {
+  const clearFieldError = (field: WizardFieldKey) => {
+    setFieldErrors((prev) => {
       if (!prev[field]) {
         return prev;
       }
@@ -399,41 +436,51 @@ export default function ComplaintWizardIsland() {
     });
   };
 
-  const focusStep5Field = (field: Step5FieldKey) => {
-    const refMap: Record<Step5FieldKey, HTMLElement | null> = {
+  const focusWizardField = (field: WizardFieldKey) => {
+    const refMap: Record<WizardFieldKey, HTMLElement | null> = {
+      incidentDateLocal: incidentDateInputRef.current,
+      incidentAddress: incidentAddressInputRef.current,
+      description: descriptionInputRef.current,
       fullName: fullNameInputRef.current,
       ciNumber: ciInputRef.current,
       phone: phoneInputRef.current,
       domicileAddress: domicileInputRef.current,
-      incidentDateLocal: incidentDateInputRef.current,
-      incidentAddress: incidentAddressInputRef.current,
-      description: descriptionInputRef.current,
     };
     const target = refMap[field];
     target?.focus();
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
-  const validateProfileAndFactInputs = (): {
+  const focusStepError = () => {
+    window.requestAnimationFrame(() => {
+      stepErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      stepErrorRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const goToStep = (nextStep: number) => {
+    setStepError(null);
+    setFieldErrors({});
+    setStepStatusMessage(null);
+    setStep(nextStep);
+  };
+
+  const validateFactInputs = (): {
     message: string | null;
-    firstInvalidField: Step5FieldKey | null;
+    firstInvalidField: FactFieldKey | null;
   } => {
-    const fieldsToCheck: [Step5FieldKey, string][] = [
-      ["fullName", fullName],
-      ["ciNumber", ciNumber],
-      ["phone", phone],
-      ["domicileAddress", domicileAddress],
+    const fieldsToCheck: [FactFieldKey, string][] = [
       ["incidentDateLocal", incidentDateLocal],
       ["incidentAddress", incidentAddress],
       ["description", description],
     ];
 
-    const errors: Step5FieldErrors = {};
-    let firstInvalidField: Step5FieldKey | null = null;
+    const errors: WizardFieldErrors = {};
+    let firstInvalidField: FactFieldKey | null = null;
     let firstMessage: string | null = null;
 
     for (const [key, value] of fieldsToCheck) {
-      const error = validateSingleStep5Field(key, value);
+      const error = validateFieldValue(key, value);
       if (error) {
         errors[key] = error;
         if (!firstInvalidField) {
@@ -443,7 +490,12 @@ export default function ComplaintWizardIsland() {
       }
     }
 
-    setStep5FieldErrors(errors);
+    setFieldErrors((prev) => ({
+      ...prev,
+      incidentDateLocal: errors.incidentDateLocal,
+      incidentAddress: errors.incidentAddress,
+      description: errors.description,
+    }));
 
     if (firstMessage) {
       return { message: firstMessage, firstInvalidField };
@@ -451,14 +503,14 @@ export default function ComplaintWizardIsland() {
 
     if (!selectedCategoryId) {
       return {
-        message: "Selecciona una tipificación y modalidad válida antes de guardar.",
+        message: "Selecciona una tipificación y modalidad válida en el Paso 1 antes de guardar.",
         firstInvalidField: null,
       };
     }
 
     if ((latitude === null) !== (longitude === null)) {
       return {
-        message: "Las coordenadas GPS deben estar completas o vacías en conjunto.",
+        message: "Las coordenadas GPS deben completarse o limpiarse en conjunto.",
         firstInvalidField: null,
       };
     }
@@ -466,16 +518,53 @@ export default function ComplaintWizardIsland() {
     return { message: null, firstInvalidField: null };
   };
 
-  const persistProfileAndDraft = async (): Promise<ComplaintRead | null> => {
+  const validateProfileInputs = (): {
+    message: string | null;
+    firstInvalidField: ProfileFieldKey | null;
+  } => {
+    const fieldsToCheck: [ProfileFieldKey, string][] = [
+      ["fullName", fullName],
+      ["ciNumber", ciNumber],
+      ["phone", phone],
+      ["domicileAddress", domicileAddress],
+    ];
+
+    const errors: WizardFieldErrors = {};
+    let firstInvalidField: ProfileFieldKey | null = null;
+    let firstMessage: string | null = null;
+
+    for (const [key, value] of fieldsToCheck) {
+      const error = validateFieldValue(key, value);
+      if (error) {
+        errors[key] = error;
+        if (!firstInvalidField) {
+          firstInvalidField = key;
+          firstMessage = error;
+        }
+      }
+    }
+
+    setFieldErrors((prev) => ({
+      ...prev,
+      fullName: errors.fullName,
+      ciNumber: errors.ciNumber,
+      phone: errors.phone,
+      domicileAddress: errors.domicileAddress,
+    }));
+
+    return { message: firstMessage, firstInvalidField };
+  };
+
+  const persistDraftFacts = async (): Promise<ComplaintRead | null> => {
     if (draftSavePromiseRef.current) {
       return draftSavePromiseRef.current;
     }
 
-    const { message: validationMsg, firstInvalidField } = validateProfileAndFactInputs();
+    const { message: validationMsg, firstInvalidField } = validateFactInputs();
     if (validationMsg) {
       setStepError(validationMsg);
       if (firstInvalidField) {
-        focusStep5Field(firstInvalidField);
+        focusWizardField(firstInvalidField);
       } else {
         focusStepError();
       }
@@ -491,28 +580,6 @@ export default function ComplaintWizardIsland() {
       setStepStatusMessage(null);
 
       try {
-        const nextFullName = fullName.trim();
-        const nextCi = ciNumber.trim();
-        const nextPhone = phone.trim();
-        const nextDomicile = domicileAddress.trim();
-
-        const profileNeedsUpdate =
-          !currentUser ||
-          currentUser.full_name !== nextFullName ||
-          currentUser.ci_number !== nextCi ||
-          currentUser.phone !== nextPhone ||
-          currentUser.address !== nextDomicile;
-
-        if (profileNeedsUpdate) {
-          const updatedUser = await updateMyProfile({
-            full_name: nextFullName,
-            ci_number: nextCi,
-            phone: nextPhone,
-            address: nextDomicile,
-          });
-          setCurrentUser(updatedUser);
-        }
-
         const isoIncidentDate = new Date(incidentDateLocal).toISOString();
         const payload = {
           offense_category_id: selectedCategoryId,
@@ -529,6 +596,7 @@ export default function ComplaintWizardIsland() {
 
         setDraftComplaint(saved);
         setEvidences(saved.evidences ?? evidences);
+        setPreviewData(null);
 
         const nextUrl = `/denunciar?draft=${encodeURIComponent(saved.id)}`;
         if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
@@ -559,70 +627,83 @@ export default function ComplaintWizardIsland() {
     return task;
   };
 
+  const persistProfileUpdate = async (): Promise<UserRead | null> => {
+    const { message: validationMsg, firstInvalidField } = validateProfileInputs();
+    if (validationMsg) {
+      setStepError(validationMsg);
+      if (firstInvalidField) {
+        focusWizardField(firstInvalidField);
+      } else {
+        focusStepError();
+      }
+      return null;
+    }
+
+    const nextFullName = fullName.trim();
+    const nextCi = ciNumber.trim();
+    const nextPhone = phone.trim();
+    const nextDomicile = domicileAddress.trim();
+
+    const needsUpdate =
+      !currentUser ||
+      currentUser.full_name !== nextFullName ||
+      currentUser.ci_number !== nextCi ||
+      currentUser.phone !== nextPhone ||
+      currentUser.address !== nextDomicile;
+
+    if (!needsUpdate && currentUser) {
+      return currentUser;
+    }
+
+    setSavingProfile(true);
+    setStepError(null);
+    try {
+      const updatedUser = await updateMyProfile({
+        full_name: nextFullName,
+        ci_number: nextCi,
+        phone: nextPhone,
+        address: nextDomicile,
+      });
+      setCurrentUser(updatedUser);
+      setPreviewData(null);
+      return updatedUser;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearStoredAccessToken();
+        redirectToLoginWithNext();
+        return null;
+      }
+      setStepError(
+        err instanceof Error && err.message
+          ? err.message
+          : "No pudimos actualizar tus datos personales.",
+      );
+      focusStepError();
+      return null;
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleContinueFromStep1 = () => {
+    if (!selectedMainType || !selectedCategoryId) {
+      setStepError("Selecciona si se trata de Maltrato o Biocidio y elige la modalidad específica.");
+      focusStepError();
+      return;
+    }
+    goToStep(2);
+  };
+
   const handleSaveDraftClick = async () => {
-    const saved = await persistProfileAndDraft();
+    const saved = await persistDraftFacts();
     if (saved) {
-      setStepStatusMessage("Borrador guardado correctamente. Puedes continuar o retomar luego desde Mis Denuncias.");
-    }
-  };
-
-  const handleContinueToPreview = async () => {
-    const saved = await persistProfileAndDraft();
-    if (!saved) {
-      return;
-    }
-
-    setStep(6);
-    setLoadingPreview(true);
-    setPreviewData(null);
-    setStepError(null);
-    try {
-      const preview = await fetchComplaintPreview(saved.id);
-      setPreviewData(preview);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        clearStoredAccessToken();
-        redirectToLoginWithNext();
-        return;
-      }
-      setStepError(
-        err instanceof Error && err.message
-          ? err.message
-          : "No pudimos generar la vista previa del Documento de Denuncia.",
+      setStepStatusMessage(
+        "Borrador guardado. Puedes adjuntar fotografías, editarlo luego desde Mis Denuncias o continuar al Paso 3.",
       );
-      focusStepError();
-    } finally {
-      setLoadingPreview(false);
     }
   };
 
-  const handleReloadPreview = async () => {
-    if (!draftComplaint) {
-      return;
-    }
-    setLoadingPreview(true);
-    setStepError(null);
-    try {
-      const preview = await fetchComplaintPreview(draftComplaint.id);
-      setPreviewData(preview);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        clearStoredAccessToken();
-        redirectToLoginWithNext();
-        return;
-      }
-      setStepError(
-        err instanceof Error && err.message
-          ? err.message
-          : "No pudimos recargar la vista previa.",
-      );
-      focusStepError();
-    } finally {
-      setLoadingPreview(false);
-    }
-  };
-
-  const handleEvidenceFileSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoSelection = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     if (files.length === 0) {
@@ -632,20 +713,36 @@ export default function ComplaintWizardIsland() {
     setStepError(null);
     setStepStatusMessage(null);
 
+    const remainingSlots = MAX_PHOTOS_PER_COMPLAINT - evidences.length;
+    if (remainingSlots <= 0) {
+      setStepError(
+        `Ya adjuntaste el máximo de ${MAX_PHOTOS_PER_COMPLAINT} fotografías para el Anexo Fotográfico.`,
+      );
+      focusStepError();
+      return;
+    }
+
+    const filesToProcess = files.slice(0, remainingSlots);
+    if (files.length > remainingSlots) {
+      setStepError(
+        `Solo puedes adjuntar ${remainingSlots} fotografía(s) más (máximo ${MAX_PHOTOS_PER_COMPLAINT} en total). Se procesarán las primeras ${remainingSlots}.`,
+      );
+    }
+
     let activeDraft = draftComplaint;
     if (!activeDraft) {
-      activeDraft = await persistProfileAndDraft();
+      activeDraft = await persistDraftFacts();
       if (!activeDraft) {
         setStepError((prev) =>
           prev
-            ? `Antes de subir evidencias: ${prev}`
-            : "Completa los datos obligatorios del denunciante y el relato antes de adjuntar archivos.",
+            ? `Antes de adjuntar fotografías: ${prev}`
+            : "Completa la fecha, dirección y relato del hecho antes de subir fotografías.",
         );
         return;
       }
     }
 
-    for (const file of files) {
+    for (const file of filesToProcess) {
       const localId = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       let validated: ReturnType<typeof validateEvidenceFile>;
       try {
@@ -659,7 +756,7 @@ export default function ComplaintWizardIsland() {
             fileSizeBytes: file.size,
             progress: 0,
             status: "error",
-            errorMessage: err instanceof Error ? err.message : "Archivo no válido.",
+            errorMessage: err instanceof Error ? err.message : "Fotografía no válida.",
           },
         ]);
         continue;
@@ -680,7 +777,6 @@ export default function ComplaintWizardIsland() {
         const presigned = await requestPresignedUpload({
           mime_type: validated.mimeType,
           file_size_bytes: validated.sizeBytes,
-          purpose: "evidence",
         });
 
         await uploadFileToPresignedUrl(presigned.upload_url, file, validated.mimeType, (percent) => {
@@ -692,15 +788,19 @@ export default function ComplaintWizardIsland() {
         });
 
         const attached = await attachComplaintEvidence(activeDraft.id, {
-          evidence_type: inferEvidenceType(validated.mimeType),
+          evidence_type: inferEvidenceType(),
           object_key: presigned.object_key,
           mime_type: validated.mimeType,
           file_size_bytes: validated.sizeBytes,
         });
 
+        const previewObjectUrl = URL.createObjectURL(file);
+        createdObjectUrlsRef.current.add(previewObjectUrl);
+        setLocalThumbnails((prev) => ({ ...prev, [attached.id]: previewObjectUrl }));
         setEvidences((prev) => [...prev, attached]);
+        setPreviewData(null);
         setUploadQueue((prev) => prev.filter((item) => item.localId !== localId));
-        setStepStatusMessage(`Evidencia "${file.name}" adjuntada al borrador.`);
+        setStepStatusMessage(`Fotografía "${file.name}" agregada al Anexo Fotográfico.`);
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
           clearStoredAccessToken();
@@ -716,7 +816,7 @@ export default function ComplaintWizardIsland() {
                   errorMessage:
                     err instanceof Error && err.message
                       ? err.message
-                      : "Error al subir el archivo.",
+                      : "Error al subir la fotografía.",
                 }
               : item,
           ),
@@ -733,8 +833,19 @@ export default function ComplaintWizardIsland() {
     setStepError(null);
     try {
       await removeComplaintEvidence(draftComplaint.id, evidenceId);
+      const oldThumb = localThumbnails[evidenceId];
+      if (oldThumb) {
+        URL.revokeObjectURL(oldThumb);
+        createdObjectUrlsRef.current.delete(oldThumb);
+      }
+      setLocalThumbnails((prev) => {
+        const next = { ...prev };
+        delete next[evidenceId];
+        return next;
+      });
       setEvidences((prev) => prev.filter((item) => item.id !== evidenceId));
-      setStepStatusMessage("Evidencia eliminada del borrador.");
+      setPreviewData(null);
+      setStepStatusMessage("Fotografía quitada del borrador.");
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearStoredAccessToken();
@@ -744,7 +855,7 @@ export default function ComplaintWizardIsland() {
       setStepError(
         err instanceof Error && err.message
           ? err.message
-          : "No se pudo eliminar la evidencia.",
+          : "No se pudo quitar la fotografía.",
       );
       focusStepError();
     } finally {
@@ -752,9 +863,69 @@ export default function ComplaintWizardIsland() {
     }
   };
 
-  const openSubmitDialog = () => {
+  const handleContinueToStep3 = async () => {
+    const activeUploads = uploadQueue.some((item) => item.status === "uploading");
+    if (activeUploads) {
+      setStepError("Espera a que termine la subida de fotografías antes de continuar.");
+      focusStepError();
+      return;
+    }
+
+    const saved = await persistDraftFacts();
+    if (!saved) {
+      return;
+    }
+
+    if (evidences.length < MIN_PHOTOS_PER_COMPLAINT || evidences.length > MAX_PHOTOS_PER_COMPLAINT) {
+      setStepError(
+        `Debes adjuntar entre ${MIN_PHOTOS_PER_COMPLAINT} y ${MAX_PHOTOS_PER_COMPLAINT} fotografías para generar el Anexo Fotográfico del PDF.`,
+      );
+      focusStepError();
+      return;
+    }
+
+    setPreviewData(null);
+    goToStep(3);
+  };
+
+  const handleRefreshProfileAndPreview = async (event?: SyntheticEvent<HTMLFormElement>) => {
+    if (event) {
+      event.preventDefault();
+    }
+    if (!draftComplaint) {
+      return;
+    }
+    const updated = await persistProfileUpdate();
+    if (!updated) {
+      return;
+    }
+    await loadHtmlPreview(draftComplaint.id);
+    setStepStatusMessage("Datos personales guardados y vista previa del Documento de Denuncia actualizada.");
+  };
+
+  const handleRequestSubmitDialog = async () => {
+    if (!draftComplaint) {
+      setStepError("Guarda primero los hechos y fotografías en el Paso 2.");
+      focusStepError();
+      return;
+    }
+
+    if (evidences.length < MIN_PHOTOS_PER_COMPLAINT || evidences.length > MAX_PHOTOS_PER_COMPLAINT) {
+      setStepError(
+        `Debes tener entre ${MIN_PHOTOS_PER_COMPLAINT} y ${MAX_PHOTOS_PER_COMPLAINT} fotografías adjuntas antes de emitir el Documento de Denuncia.`,
+      );
+      focusStepError();
+      return;
+    }
+
+    const updatedUser = await persistProfileUpdate();
+    if (!updatedUser) {
+      return;
+    }
+
     setStepError(null);
     confirmDialogRef.current?.showModal();
+    cancelConfirmButtonRef.current?.focus();
   };
 
   const closeSubmitDialog = () => {
@@ -777,7 +948,7 @@ export default function ComplaintWizardIsland() {
       setDraftComplaint(finalized);
       setEvidences(finalized.evidences ?? evidences);
       window.history.replaceState(null, "", "/denunciar");
-      setStep(7);
+      setStep(4);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearStoredAccessToken();
@@ -788,7 +959,7 @@ export default function ComplaintWizardIsland() {
       setStepError(
         err instanceof Error && err.message
           ? err.message
-          : "No pudimos confirmar el envío definitivo de la denuncia.",
+          : "No pudimos emitir el Documento de Denuncia definitivo.",
       );
       focusStepError();
     } finally {
@@ -819,41 +990,49 @@ export default function ComplaintWizardIsland() {
     }
   };
 
-  const handleCopyTrackingCode = async (code: string) => {
+  const handleCopyCode = async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
       setCopiedCode(true);
-      window.setTimeout(() => setCopiedCode(false), 2500);
+      window.setTimeout(() => setCopiedCode(false), 2400);
     } catch {
       setCopiedCode(false);
     }
   };
 
-  const handleStartNewComplaint = () => {
-    setAlreadySubmittedView(null);
-    setSubmittedComplaint(null);
+  const handleStartAnother = () => {
+    for (const url of createdObjectUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    createdObjectUrlsRef.current.clear();
+    setLocalThumbnails({});
     setDraftComplaint(null);
-    setPreviewData(null);
-    setEvidences([]);
-    setUploadQueue([]);
+    setSubmittedComplaint(null);
+    setAlreadySubmittedView(null);
     setSelectedMainType(null);
     setSelectedCategoryId(null);
     setIncidentDateLocal(getCurrentLocalDateTimeInputValue());
     setIncidentAddress("");
     setLatitude(null);
     setLongitude(null);
+    setMapExpanded(false);
     setDescription("");
-    setStepError(null);
-    setStepStatusMessage(null);
+    setEvidences([]);
+    setUploadQueue([]);
+    setPreviewData(null);
+    setDraftWarning(null);
     window.history.replaceState(null, "", "/denunciar");
-    setStep(1);
+    goToStep(1);
   };
 
   if (initializing) {
     return (
-      <div className="rounded-3xl border border-border bg-bg-surface p-8 text-center shadow-xs">
-        <p className="m-0 text-sm font-medium text-text-secondary">
-          Preparando asistente guiado de denuncia...
+      <div className="mx-auto max-w-4xl rounded-3xl border border-border bg-bg-surface p-8 text-center shadow-xs">
+        <p className="m-0 font-display text-lg font-semibold text-text-primary">
+          Preparando asistente ciudadano de denuncia...
+        </p>
+        <p className="mt-2 mb-0 text-sm text-text-secondary">
+          Cargando catálogo legal vigente y tu sesión verificada.
         </p>
       </div>
     );
@@ -861,17 +1040,29 @@ export default function ComplaintWizardIsland() {
 
   if (loadError) {
     return (
-      <div role="alert" className="rounded-3xl border border-sos/30 bg-sos-soft p-6">
-        <h1 className="m-0 font-display text-xl font-bold text-sos-text">
-          No se pudo cargar el asistente de denuncia
+      <div
+        role="alert"
+        className="mx-auto max-w-3xl rounded-3xl border border-sos/30 bg-sos-soft p-6 text-sos-text"
+      >
+        <h1 className="m-0 font-display text-xl font-bold">
+          No pudimos iniciar el asistente de denuncia
         </h1>
-        <p className="mt-2 mb-4 text-sm text-text-primary">{loadError}</p>
-        <a
-          href="/denunciar"
-          className="inline-flex min-h-[44px] items-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white no-underline"
-        >
-          Reintentar
-        </a>
+        <p className="mt-2 text-sm">{loadError}</p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
+          >
+            Reintentar carga
+          </button>
+          <a
+            href="/"
+            className="inline-flex min-h-[44px] items-center rounded-xl border border-border bg-bg-surface px-4 py-2 text-sm font-semibold text-text-primary no-underline hover:bg-bg-canvas"
+          >
+            Volver al inicio
+          </a>
+        </div>
       </div>
     );
   }
@@ -879,34 +1070,29 @@ export default function ComplaintWizardIsland() {
   if (alreadySubmittedView) {
     const statusMeta = COMPLAINT_STATUS_META[alreadySubmittedView.status];
     return (
-      <section className="rounded-3xl border border-border bg-bg-surface p-6 shadow-xs sm:p-8">
-        <div className="inline-flex items-center gap-2 rounded-full bg-secondary-soft px-3 py-1 text-xs font-semibold text-secondary-text">
-          <Lock aria-hidden="true" className="h-3.5 w-3.5" />
-          <span>Denuncia ya enviada e inmutable</span>
-        </div>
-        <h1 className="mt-3 font-display text-2xl font-bold text-text-primary">
-          Este caso ya cuenta con Documento de Denuncia oficial
-        </h1>
-        <p className="mt-2 text-sm text-text-secondary">
-          Código correlativo:{" "}
-          <strong className="tabular-nums text-text-primary">
-            {alreadySubmittedView.tracking_code ?? "Asignado"}
-          </strong>{" "}
-          · Estado actual:{" "}
-          <span
-            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusMeta.badgeClass}`}
-          >
-            {statusMeta.label}
+      <div className="mx-auto max-w-3xl rounded-3xl border border-border bg-bg-surface p-6 shadow-xs sm:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${statusMeta.badgeClass}`}>
+            <Lock aria-hidden="true" className="h-3.5 w-3.5" />
+            <span>{statusMeta.label}</span>
           </span>
+          {alreadySubmittedView.tracking_code && (
+            <span className="tabular-nums text-xs font-bold text-text-primary">
+              {alreadySubmittedView.tracking_code}
+            </span>
+          )}
+        </div>
+
+        <h1 className="mt-4 font-display text-2xl font-bold text-text-primary">
+          Este Documento de Denuncia ya fue emitido
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+          El documento es inmutable y conserva su código correlativo junto con su Anexo Fotográfico en PDF.
         </p>
 
         {stepError && (
-          <div
-            role="alert"
-            className="mt-4 flex items-start gap-2.5 rounded-2xl border border-sos/30 bg-sos-soft p-4 text-sm font-medium text-sos-text"
-          >
-            <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{stepError}</span>
+          <div role="alert" className="mt-4 rounded-xl border border-sos/30 bg-sos-soft px-4 py-3 text-sm text-sos-text">
+            {stepError}
           </div>
         )}
 
@@ -915,7 +1101,7 @@ export default function ComplaintWizardIsland() {
             type="button"
             disabled={downloadingPdf}
             onClick={() => handleDownloadPdf(alreadySubmittedView.id)}
-            className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60"
+            className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60"
           >
             <Download aria-hidden="true" className="h-4 w-4" />
             <span>{downloadingPdf ? "Generando enlace..." : "Descargar Documento de Denuncia (PDF)"}</span>
@@ -923,72 +1109,83 @@ export default function ComplaintWizardIsland() {
 
           <a
             href="/mis-denuncias"
-            className="inline-flex min-h-[44px] items-center rounded-xl border border-border bg-bg-canvas px-4 py-2.5 text-sm font-semibold text-text-primary no-underline hover:bg-slate-100"
+            className="inline-flex min-h-[48px] items-center rounded-xl border border-border bg-bg-canvas px-4 py-2.5 text-sm font-semibold text-text-primary no-underline hover:bg-primary-soft hover:text-primary"
           >
             Ir a Mis Denuncias
           </a>
-
-          <button
-            type="button"
-            onClick={handleStartNewComplaint}
-            className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl border border-primary/30 bg-primary-soft px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary/10"
-          >
-            Iniciar nueva denuncia
-          </button>
         </div>
-      </section>
+      </div>
     );
   }
 
-  const isUploadingAny = uploadQueue.some((item) => item.status === "uploading");
-
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-border bg-bg-surface p-5 shadow-xs sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="rounded-3xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="m-0 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-sos-text">
-              <ShieldAlert aria-hidden="true" className="h-4 w-4" />
-              <span>Ruta Digital Anti-Estrés · 7 Pasos</span>
+            <p className="m-0 text-xs font-semibold uppercase tracking-wide text-primary">
+              Ruta guiada en 4 pasos · Sucre, Bolivia
             </p>
-            <p className="mt-1 mb-0 text-sm text-text-secondary">
-              Prepara tu <strong>Documento de Denuncia</strong> en Sucre con respaldo normativo y
-              pruebas seguras.
-            </p>
+            <h1 className="mt-0.5 mb-0 font-display text-xl font-bold text-text-primary sm:text-2xl">
+              Asistente para Documento de Denuncia
+            </h1>
           </div>
-          {draftComplaint && step < 7 && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-secondary/30 bg-secondary-soft px-3 py-1 text-xs font-semibold text-secondary-text">
-              <Save aria-hidden="true" className="h-3.5 w-3.5" />
-              <span>Borrador guardado</span>
-            </span>
-          )}
+
+          <span className="tabular-nums inline-flex w-fit items-center rounded-full bg-primary-soft px-3 py-1 text-xs font-bold text-primary">
+            Paso {step} de {STEP_LABELS.length}
+          </span>
         </div>
 
-        <nav aria-label="Progreso de la denuncia" className="mt-5">
-          <ol className="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4 lg:grid-cols-7">
+        <nav aria-label="Progreso del asistente" className="mt-4">
+          <ol className="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4">
             {STEP_LABELS.map((label, idx) => {
               const stepNum = idx + 1;
-              const isCompleted = step > stepNum || (step === 7 && stepNum === 7);
-              const isCurrent = step === stepNum && step < 7;
+              const isCurrent = stepNum === step;
+              const isDone = stepNum < step || step === 4;
+              const canJump =
+                step < 4 &&
+                ((stepNum === 1) ||
+                  (stepNum === 2 && Boolean(selectedCategoryId)) ||
+                  (stepNum === 3 &&
+                    Boolean(draftComplaint) &&
+                    evidences.length >= MIN_PHOTOS_PER_COMPLAINT));
+
               return (
-                <li
-                  key={label}
-                  aria-current={isCurrent ? "step" : undefined}
-                  className={[
-                    "flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                    isCompleted
-                      ? "border-secondary/30 bg-secondary-soft text-text-primary"
-                      : isCurrent
-                        ? "border-primary bg-primary text-white"
-                        : "border-border bg-slate-100 text-text-secondary",
-                  ].join(" ")}
-                >
-                  {isCompleted ? (
-                    <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-secondary" />
-                  ) : (
-                    <span className="tabular-nums shrink-0">{stepNum}.</span>
-                  )}
-                  <span className="truncate">{label.replace(/^\d+\.\s*/, "")}</span>
+                <li key={label} className="min-w-0">
+                  <button
+                    type="button"
+                    disabled={!canJump && !isCurrent}
+                    aria-current={isCurrent ? "step" : undefined}
+                    onClick={() => {
+                      if (canJump && stepNum !== step) {
+                        goToStep(stepNum);
+                      }
+                    }}
+                    className={[
+                      "flex min-h-[42px] w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors",
+                      isCurrent
+                        ? "border-primary bg-primary text-white shadow-xs"
+                        : isDone
+                          ? "cursor-pointer border-secondary/35 bg-secondary-soft text-secondary-text hover:bg-secondary/15"
+                          : canJump
+                            ? "cursor-pointer border-border bg-bg-canvas text-text-primary hover:bg-primary-soft hover:text-primary"
+                            : "cursor-not-allowed border-border bg-bg-canvas/70 text-text-muted",
+                    ].join(" ")}
+                  >
+                    <span
+                      className={[
+                        "tabular-nums inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
+                        isCurrent
+                          ? "bg-white/20 text-white"
+                          : isDone
+                            ? "bg-secondary text-white"
+                            : "bg-bg-surface text-text-secondary",
+                      ].join(" ")}
+                    >
+                      {isDone && !isCurrent ? <Check aria-hidden="true" className="h-3 w-3" /> : stepNum}
+                    </span>
+                    <span className="truncate">{label.replace(/^\d+\.\s*/, "")}</span>
+                  </button>
                 </li>
               );
             })}
@@ -999,627 +1196,236 @@ export default function ComplaintWizardIsland() {
       {draftWarning && (
         <div
           role="status"
-          className="rounded-2xl border border-primary/25 bg-primary-soft p-4 text-sm text-text-primary"
+          className="rounded-2xl border border-secondary/30 bg-secondary-soft px-4 py-3 text-sm text-secondary-text"
         >
           {draftWarning}
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
-        <section className="min-w-0 rounded-3xl border border-border bg-bg-surface p-5 shadow-xs sm:p-7">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
+        <div className="min-w-0 space-y-5 lg:col-span-7 xl:col-span-8">
           {stepError && (
             <div
               ref={stepErrorRef}
               tabIndex={-1}
               role="alert"
-              className="mb-5 flex items-start gap-2.5 rounded-2xl border border-sos/30 bg-sos-soft p-4 text-sm font-medium text-sos-text"
+              className="flex items-start gap-2.5 rounded-2xl border border-sos/35 bg-sos-soft p-4 text-sm text-sos-text"
             >
-              <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{stepError}</span>
+              <AlertTriangle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
+              <p className="m-0 font-medium leading-relaxed">{stepError}</p>
             </div>
           )}
 
-          {stepStatusMessage && step !== 5 && (
+          {stepStatusMessage && !stepError && (
             <div
               role="status"
               aria-live="polite"
-              className="mb-5 flex items-start gap-2.5 rounded-2xl border border-secondary/30 bg-secondary-soft p-4 text-sm font-medium text-secondary-text"
+              className="flex items-start gap-2.5 rounded-2xl border border-secondary/30 bg-secondary-soft p-4 text-sm text-secondary-text"
             >
-              <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{stepStatusMessage}</span>
+              <CheckCircle2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
+              <p className="m-0 font-medium leading-relaxed">{stepStatusMessage}</p>
             </div>
           )}
 
           {step === 1 && (
-            <div className="space-y-6">
-              <div>
-                <h1
+            <section className="rounded-3xl border border-border bg-bg-surface p-5 shadow-xs sm:p-7">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2
                   ref={stepHeadingRef}
                   tabIndex={-1}
-                  className="m-0 font-display text-xl font-bold text-text-primary sm:text-2xl"
+                  className="m-0 font-display text-xl font-bold text-text-primary focus:outline-none sm:text-2xl"
                 >
-                  1. Inicio de denuncia ciudadana
-                </h1>
-                <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-                  Este asistente genera un <strong>Documento de Denuncia</strong> estructurado (sin
-                  necesidad de firma de abogado) para presentarlo ante Fiscalía, POFOMA, CEMZOO o
-                  el GAM Sucre.
-                </p>
+                  1. Tipifica el caso y su sustento legal
+                </h2>
+                <span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-semibold text-primary">
+                  Código Penal · Ley N.º 700
+                </span>
               </div>
 
-              <div className="rounded-2xl border-2 border-primary bg-primary-soft/50 p-4">
-                <label className="flex cursor-pointer items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={confirmedStart}
-                    onChange={(event) => setConfirmedStart(event.target.checked)}
-                    className="mt-1 h-4 w-4 accent-primary"
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-text-primary">
-                      Denunciar maltrato animal o biocidio
-                    </span>
-                    <span className="mt-0.5 block text-xs leading-relaxed text-text-secondary">
-                      Confirmo que los hechos que reportaré corresponden a un caso real en defensa
-                      de animales en situación de crueldad, abandono o riesgo.
-                    </span>
+              <details className="mt-3 rounded-2xl border border-border bg-bg-canvas px-4 py-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-semibold text-text-primary">
+                  <span className="inline-flex items-center gap-2">
+                    <Info aria-hidden="true" className="h-4 w-4 text-primary" />
+                    <span>¿Cómo funciona este asistente ciudadano?</span>
                   </span>
-                </label>
-              </div>
-
-              <div className="rounded-2xl border border-sos/25 bg-sos-soft p-4 text-xs leading-relaxed text-text-primary">
-                <p className="m-0 font-semibold text-sos-text">
-                  ¿El animal necesita atención veterinaria inmediata?
+                  <ChevronDown aria-hidden="true" className="h-4 w-4 text-text-secondary" />
+                </summary>
+                <p className="mt-2.5 mb-0 text-xs leading-relaxed text-text-secondary">
+                  Generarás un <strong>Documento de Denuncia</strong> en PDF con base legal automática y un{" "}
+                  <strong>Anexo Fotográfico</strong> (de 1 a 3 fotos) listo para presentar ante Fiscalía,
+                  POFOMA o CEMZOO.
                 </p>
-                <p className="mt-1 mb-0 text-text-secondary">
-                  Si existe riesgo vital en curso, puedes ubicar una veterinaria de urgencia o
-                  CEMZOO en el{" "}
-                  <a href="/mapa" className="font-semibold text-primary underline">
-                    mapa de centros veterinarios
-                  </a>{" "}
-                  mientras registras tu denuncia.
-                </p>
-              </div>
+              </details>
 
-              {draftComplaint && (
-                <div className="rounded-2xl border border-secondary/30 bg-secondary-soft p-4">
-                  <p className="m-0 text-sm font-semibold text-secondary-text">
-                    Borrador activo retomado
-                  </p>
-                  <p className="mt-1 mb-3 text-xs text-text-primary">
-                    {draftComplaint.incident_address} · {evidences.length} evidencia(s) adjunta(s).
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => goToStep(5)}
-                    className="inline-flex min-h-[40px] cursor-pointer items-center gap-1.5 rounded-lg bg-secondary px-3.5 py-2 text-xs font-semibold text-white hover:opacity-95"
-                  >
-                    <span>Ir directo al Paso 5 (Datos y Evidencias)</span>
-                    <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
+              <fieldset className="mt-6 border-0 p-0">
+                <legend className="text-sm font-semibold text-text-primary">
+                  Paso A: Selecciona el tipo principal de hecho
+                </legend>
 
-              <div className="flex justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!confirmedStart) {
-                      setStepError("Marca la confirmación para continuar con la denuncia.");
-                      focusStepError();
-                      return;
-                    }
-                    goToStep(2);
-                  }}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
-                >
-                  <span>Siguiente: Tipo de hecho</span>
-                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="space-y-6">
-              <div>
-                <h1
-                  ref={stepHeadingRef}
-                  tabIndex={-1}
-                  className="m-0 font-display text-xl font-bold text-text-primary sm:text-2xl"
-                >
-                  2. Tipo de denuncia
-                </h1>
-                <p className="mt-2 text-sm text-text-secondary">
-                  Selecciona la calificación jurídica principal que describe el hecho presenciado.
-                </p>
-              </div>
-
-              <fieldset className="m-0 border-0 p-0">
-                <legend className="visually-hidden">Selecciona el tipo principal de delito o infracción</legend>
-                <div className="grid gap-4">
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {(["MALTRATO", "BIOCIDIO"] as const).map((typeKey) => {
                     const meta = OFFENSE_MAIN_TYPE_META[typeKey];
                     const selected = selectedMainType === typeKey;
-                    const isBiocidio = typeKey === "BIOCIDIO";
                     return (
-                      <label
+                      <button
                         key={typeKey}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          setSelectedMainType(typeKey);
+                          if (selectedCategory && selectedCategory.main_type !== typeKey) {
+                            setSelectedCategoryId(null);
+                          }
+                          setStepError(null);
+                        }}
                         className={[
-                          "flex cursor-pointer items-start gap-3.5 rounded-2xl border p-4 transition-colors",
+                          "flex min-h-[104px] cursor-pointer flex-col justify-between rounded-2xl border-2 p-4 text-left transition-all",
                           selected
-                            ? isBiocidio
-                              ? "border-2 border-sos bg-sos-soft/50"
-                              : "border-2 border-primary bg-primary-soft/60"
-                            : "border-border bg-bg-surface hover:bg-bg-canvas",
+                            ? typeKey === "BIOCIDIO"
+                              ? "border-sos bg-sos-soft/70 shadow-xs"
+                              : "border-primary bg-primary-soft/70 shadow-xs"
+                            : "border-border bg-bg-canvas hover:border-primary/40 hover:bg-bg-surface",
                         ].join(" ")}
                       >
-                        <input
-                          type="radio"
-                          name="offense_main_type"
-                          value={typeKey}
-                          checked={selected}
-                          onChange={() => {
-                            setSelectedMainType(typeKey);
-                            const currentCatMatches = categories.some(
-                              (cat) => cat.id === selectedCategoryId && cat.main_type === typeKey,
-                            );
-                            if (!currentCatMatches) {
-                              setSelectedCategoryId(null);
-                            }
-                            setStepError(null);
-                          }}
-                          className={`mt-1 h-4 w-4 ${isBiocidio ? "accent-sos" : "accent-primary"}`}
-                        />
-                        <span className="min-w-0">
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span className="font-display text-base font-bold text-text-primary">
-                              {meta.label}
-                            </span>
-                            <span
-                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${meta.badgeClass}`}
-                            >
-                              {meta.article}
-                            </span>
+                        <div className="flex w-full items-center justify-between gap-2">
+                          <span className="font-display text-base font-bold text-text-primary">
+                            {meta.label}
                           </span>
-                          <span className="mt-1.5 block text-sm leading-relaxed text-text-secondary">
-                            {meta.summary}
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${meta.badgeClass}`}>
+                            {typeKey === "BIOCIDIO" ? "Art. 350 ter" : "Art. 350 bis"}
                           </span>
-                        </span>
-                      </label>
+                        </div>
+                        <p className="mt-2 mb-0 text-xs leading-relaxed text-text-secondary">
+                          {meta.summary}
+                        </p>
+                      </button>
                     );
                   })}
                 </div>
               </fieldset>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => goToStep(1)}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-bg-canvas"
-                >
-                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  <span>Anterior</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!selectedMainType) {
-                      setStepError("Selecciona Maltrato animal o Biocidio para continuar.");
-                      focusStepError();
-                      return;
-                    }
-                    goToStep(3);
-                  }}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary-hover"
-                >
-                  <span>Siguiente: Modalidad</span>
-                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
+              {selectedMainType && (
+                <fieldset className="mt-6 border-0 p-0">
+                  <legend className="text-sm font-semibold text-text-primary">
+                    Paso B: Elige la modalidad específica ({filteredCategories.length} opciones)
+                  </legend>
 
-          {step === 3 && (
-            <div className="space-y-6">
-              <div>
-                <h1
-                  ref={stepHeadingRef}
-                  tabIndex={-1}
-                  className="m-0 font-display text-xl font-bold text-text-primary sm:text-2xl"
-                >
-                  3. Modalidad específica
-                </h1>
-                <p className="mt-2 text-sm text-text-secondary">
-                  Elige la modalidad que mejor corresponde al hecho dentro de{" "}
-                  <strong>
-                    {selectedMainType ? OFFENSE_MAIN_TYPE_META[selectedMainType].label : ""}
-                  </strong>
-                  .
-                </p>
-              </div>
-
-              <fieldset className="m-0 border-0 p-0">
-                <legend className="visually-hidden">Modalidades tipificadas</legend>
-                <div className="grid gap-3">
-                  {filteredCategories.map((category) => {
-                    const selected = selectedCategoryId === category.id;
-                    return (
-                      <label
-                        key={category.id}
-                        className={[
-                          "flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition-colors",
-                          selected
-                            ? "border-2 border-primary bg-primary-soft/60"
-                            : "border-border bg-bg-surface hover:bg-bg-canvas",
-                        ].join(" ")}
-                      >
-                        <input
-                          type="radio"
-                          name="offense_category_id"
-                          value={category.id}
-                          checked={selected}
-                          onChange={() => {
-                            setSelectedCategoryId(category.id);
+                  <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    {filteredCategories.map((cat) => {
+                      const active = selectedCategoryId === cat.id;
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => {
+                            setSelectedCategoryId(cat.id);
                             setStepError(null);
                           }}
-                          className="mt-1 h-4 w-4 accent-primary"
-                        />
-                        <span className="min-w-0">
-                          <span className="block text-sm font-semibold text-text-primary">
-                            {category.subtype_name}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </fieldset>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => goToStep(2)}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-bg-canvas"
-                >
-                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  <span>Anterior</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!selectedCategoryId) {
-                      setStepError("Elige una modalidad específica del catálogo para continuar.");
-                      focusStepError();
-                      return;
-                    }
-                    goToStep(4);
-                  }}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary-hover"
-                >
-                  <span>Siguiente: Fundamento legal</span>
-                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="space-y-6">
-              <div>
-                <h1
-                  ref={stepHeadingRef}
-                  tabIndex={-1}
-                  className="m-0 font-display text-xl font-bold text-text-primary sm:text-2xl"
-                >
-                  4. Fundamento legal aplicable
-                </h1>
-                <p className="mt-2 text-sm text-text-secondary">
-                  Tu <strong>Documento de Denuncia</strong> incorporará automáticamente la base
-                  normativa vigente para el caso seleccionado.
-                </p>
-              </div>
+                          className={[
+                            "flex min-h-[54px] cursor-pointer items-center justify-between gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition-colors sm:text-sm",
+                            active
+                              ? "border-primary bg-primary text-white shadow-xs"
+                              : "border-border bg-bg-surface text-text-primary hover:bg-primary-soft/60",
+                          ].join(" ")}
+                        >
+                          <span className="leading-snug">{cat.subtype_name}</span>
+                          {active && <Check aria-hidden="true" className="h-4 w-4 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              )}
 
               {selectedCategory && (
-                <div className="rounded-2xl border border-primary/25 bg-primary-soft p-5">
-                  <p className="m-0 text-xs font-semibold uppercase tracking-wide text-primary">
-                    Tipificación elegida
-                  </p>
-                  <h2 className="mt-1 mb-0 font-display text-lg font-bold text-text-primary">
-                    {selectedCategory.main_type} — {selectedCategory.subtype_name}
-                  </h2>
-                  <p className="mt-3 mb-0 text-sm leading-relaxed text-text-primary">
-                    {selectedCategory.legal_basis}
-                  </p>
+                <div className="mt-6 rounded-2xl border border-primary/25 bg-primary-soft/50 p-4">
+                  <div className="flex items-start gap-2.5">
+                    <Scale aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                    <div className="min-w-0">
+                      <p className="m-0 text-xs font-bold uppercase tracking-wide text-primary">
+                        Fundamento Jurídico Automático
+                      </p>
+                      <p className="mt-1 mb-0 text-xs leading-relaxed text-text-primary sm:text-sm">
+                        {selectedCategory.legal_basis}
+                      </p>
+
+                      <details className="mt-2.5">
+                        <summary className="cursor-pointer text-xs font-semibold text-primary">
+                          Ver autoridades competentes receptoras
+                        </summary>
+                        <ul className="mt-2 mb-0 list-disc space-y-1 pl-4 text-xs text-text-secondary">
+                          {RECEIVER_INSTITUTIONS.map((inst) => (
+                            <li key={inst}>{inst}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    </div>
+                  </div>
                 </div>
               )}
 
-              <div className="rounded-2xl border border-border bg-bg-canvas p-5">
-                <h2 className="m-0 font-display text-base font-semibold text-text-primary">
-                  Autoridades competentes receptoras
-                </h2>
-                <p className="mt-1.5 text-xs text-text-secondary">
-                  Podrás descargar el PDF definitivo y presentarlo ante las siguientes instancias en
-                  Sucre:
-                </p>
-                <ul className="m-0 mt-3 list-none space-y-2 p-0">
-                  {DESTINATARIO_INSTITUTIONS.map((inst) => (
-                    <li key={inst} className="flex items-center gap-2 text-sm text-text-primary">
-                      <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-secondary" />
-                      <span>{inst}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <div className="mt-7 flex flex-wrap justify-end gap-3 border-t border-border pt-5">
                 <button
                   type="button"
-                  onClick={() => goToStep(3)}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-bg-canvas"
+                  onClick={handleContinueFromStep1}
+                  className="inline-flex min-h-[48px] w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-hover sm:w-auto"
                 >
-                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  <span>Anterior</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goToStep(5)}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary-hover"
-                >
-                  <span>Siguiente: Datos y evidencias</span>
+                  <span>Continuar a Hechos y Fotos</span>
                   <ArrowRight aria-hidden="true" className="h-4 w-4" />
                 </button>
               </div>
-            </div>
+            </section>
           )}
 
-          {step === 5 && (
-            <form
-              method="post"
-              noValidate
-              aria-labelledby="step5-heading"
-              onSubmit={(event: SyntheticEvent<HTMLFormElement>) => {
-                event.preventDefault();
-                void handleContinueToPreview();
-              }}
-              className="space-y-6"
-            >
-              <div>
-                <h1
-                  id="step5-heading"
+          {step === 2 && (
+            <section className="rounded-3xl border border-border bg-bg-surface p-5 shadow-xs sm:p-7">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2
                   ref={stepHeadingRef}
                   tabIndex={-1}
-                  className="m-0 font-display text-xl font-bold text-text-primary sm:text-2xl"
+                  className="m-0 font-display text-xl font-bold text-text-primary focus:outline-none sm:text-2xl"
                 >
-                  5. Datos del denunciante, hechos y evidencias
-                </h1>
-                <p className="mt-2 text-sm text-text-secondary">
-                  Completa tus datos de respaldo legal, describe el hecho, marca opcionalmente la
-                  ubicación en el mapa y adjunta tus pruebas.
-                </p>
+                  2. Hechos, Ubicación y Fotografías
+                </h2>
+                <span className="tabular-nums rounded-full bg-secondary-soft px-3 py-1 text-xs font-bold text-secondary-text">
+                  {evidences.length}/{MAX_PHOTOS_PER_COMPLAINT} fotos
+                </span>
               </div>
 
-              <fieldset className="space-y-4 rounded-2xl border border-border bg-bg-canvas p-4 sm:p-5">
-                <legend className="px-1.5 font-display text-sm font-bold text-text-primary">
-                  Identidad del denunciante (Perfilamiento Progresivo)
-                </legend>
-                <p className="m-0 text-xs text-text-secondary">
-                  Obligatorio para emitir el Documento de Denuncia oficial. Estos datos no se
-                  muestran en la consulta pública por código.
-                </p>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="sm:col-span-2">
-                    <label
-                      htmlFor="wizard-full-name"
-                      className="mb-1 block text-sm font-semibold text-text-primary"
-                    >
-                      Nombre completo <span aria-hidden="true" className="text-sos">*</span>
-                    </label>
-                    <input
-                      ref={fullNameInputRef}
-                      id="wizard-full-name"
-                      name="full_name"
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => {
-                        setFullName(e.target.value);
-                        clearStep5FieldError("fullName");
-                      }}
-                      onBlur={() => {
-                        if (fullName.trim().length > 0) {
-                          const err = validateSingleStep5Field("fullName", fullName);
-                          if (err) {
-                            setStep5FieldErrors((prev) => ({ ...prev, fullName: err }));
-                          }
-                        }
-                      }}
-                      autoComplete="name"
-                      required
-                      maxLength={150}
-                      aria-invalid={step5FieldErrors.fullName ? "true" : undefined}
-                      aria-describedby={step5FieldErrors.fullName ? "wizard-full-name-error" : undefined}
-                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-base text-text-primary"
-                    />
-                    {step5FieldErrors.fullName && (
-                      <p id="wizard-full-name-error" className="mt-1 mb-0 text-xs font-medium text-sos-text">
-                        {step5FieldErrors.fullName}
-                      </p>
-                    )}
-                  </div>
-
+              <div className="mt-5 space-y-5">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label
-                      htmlFor="wizard-ci"
-                      className="mb-1 block text-sm font-semibold text-text-primary"
-                    >
-                      Cédula de Identidad (C.I.) <span aria-hidden="true" className="text-sos">*</span>
-                    </label>
-                    <input
-                      ref={ciInputRef}
-                      id="wizard-ci"
-                      name="ci_number"
-                      type="text"
-                      value={ciNumber}
-                      onChange={(e) => {
-                        setCiNumber(e.target.value);
-                        clearStep5FieldError("ciNumber");
-                      }}
-                      onBlur={() => {
-                        if (ciNumber.trim().length > 0) {
-                          const err = validateSingleStep5Field("ciNumber", ciNumber);
-                          if (err) {
-                            setStep5FieldErrors((prev) => ({ ...prev, ciNumber: err }));
-                          }
-                        }
-                      }}
-                      required
-                      maxLength={30}
-                      spellCheck={false}
-                      autoCapitalize="characters"
-                      placeholder="Ej. 7482910 CH"
-                      aria-invalid={step5FieldErrors.ciNumber ? "true" : undefined}
-                      aria-describedby={step5FieldErrors.ciNumber ? "wizard-ci-error" : undefined}
-                      className="tabular-nums w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-base text-text-primary"
-                    />
-                    {step5FieldErrors.ciNumber && (
-                      <p id="wizard-ci-error" className="mt-1 mb-0 text-xs font-medium text-sos-text">
-                        {step5FieldErrors.ciNumber}
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="wizard-phone"
-                      className="mb-1 block text-sm font-semibold text-text-primary"
-                    >
-                      Teléfono / Celular <span aria-hidden="true" className="text-sos">*</span>
-                    </label>
-                    <input
-                      ref={phoneInputRef}
-                      id="wizard-phone"
-                      name="phone"
-                      type="tel"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      value={phone}
-                      onChange={(e) => {
-                        setPhone(e.target.value);
-                        clearStep5FieldError("phone");
-                      }}
-                      onBlur={() => {
-                        if (phone.trim().length > 0) {
-                          const err = validateSingleStep5Field("phone", phone);
-                          if (err) {
-                            setStep5FieldErrors((prev) => ({ ...prev, phone: err }));
-                          }
-                        }
-                      }}
-                      required
-                      maxLength={30}
-                      placeholder="Ej. +591 71234567"
-                      aria-invalid={step5FieldErrors.phone ? "true" : undefined}
-                      aria-describedby={step5FieldErrors.phone ? "wizard-phone-error" : undefined}
-                      className="tabular-nums w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-base text-text-primary"
-                    />
-                    {step5FieldErrors.phone && (
-                      <p id="wizard-phone-error" className="mt-1 mb-0 text-xs font-medium text-sos-text">
-                        {step5FieldErrors.phone}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label
-                      htmlFor="wizard-domicile"
-                      className="mb-1 block text-sm font-semibold text-text-primary"
-                    >
-                      Domicilio real del denunciante{" "}
-                      <span aria-hidden="true" className="text-sos">*</span>
-                    </label>
-                    <input
-                      ref={domicileInputRef}
-                      id="wizard-domicile"
-                      name="address"
-                      type="text"
-                      autoComplete="street-address"
-                      value={domicileAddress}
-                      onChange={(e) => {
-                        setDomicileAddress(e.target.value);
-                        clearStep5FieldError("domicileAddress");
-                      }}
-                      onBlur={() => {
-                        if (domicileAddress.trim().length > 0) {
-                          const err = validateSingleStep5Field("domicileAddress", domicileAddress);
-                          if (err) {
-                            setStep5FieldErrors((prev) => ({ ...prev, domicileAddress: err }));
-                          }
-                        }
-                      }}
-                      required
-                      maxLength={255}
-                      placeholder="Ej. Av. Hernando Siles N.º 410, Sucre"
-                      aria-invalid={step5FieldErrors.domicileAddress ? "true" : undefined}
-                      aria-describedby={
-                        step5FieldErrors.domicileAddress ? "wizard-domicile-error" : undefined
-                      }
-                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-base text-text-primary"
-                    />
-                    {step5FieldErrors.domicileAddress && (
-                      <p id="wizard-domicile-error" className="mt-1 mb-0 text-xs font-medium text-sos-text">
-                        {step5FieldErrors.domicileAddress}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </fieldset>
-
-              <fieldset className="space-y-4 rounded-2xl border border-border bg-bg-surface p-4 sm:p-5">
-                <legend className="px-1.5 font-display text-sm font-bold text-text-primary">
-                  Circunstancias del hecho
-                </legend>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label
-                      htmlFor="wizard-incident-date"
-                      className="mb-1 block text-sm font-semibold text-text-primary"
-                    >
-                      Fecha y hora del hecho <span aria-hidden="true" className="text-sos">*</span>
-                    </label>
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <label htmlFor="wizard-incident-date" className="text-xs font-semibold text-text-primary">
+                        Fecha y hora aproximada *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIncidentDateLocal(getCurrentLocalDateTimeInputValue());
+                          clearFieldError("incidentDateLocal");
+                        }}
+                        className="cursor-pointer border-0 bg-transparent p-0 text-[11px] font-semibold text-primary underline"
+                      >
+                        Usar fecha actual
+                      </button>
+                    </div>
                     <input
                       ref={incidentDateInputRef}
                       id="wizard-incident-date"
-                      name="incident_date"
                       type="datetime-local"
                       value={incidentDateLocal}
-                      max={getCurrentLocalDateTimeInputValue()}
                       onChange={(e) => {
                         setIncidentDateLocal(e.target.value);
-                        clearStep5FieldError("incidentDateLocal");
+                        clearFieldError("incidentDateLocal");
                       }}
-                      onBlur={() => {
-                        if (incidentDateLocal) {
-                          const err = validateSingleStep5Field("incidentDateLocal", incidentDateLocal);
-                          if (err) {
-                            setStep5FieldErrors((prev) => ({ ...prev, incidentDateLocal: err }));
-                          }
-                        }
-                      }}
-                      required
-                      aria-invalid={step5FieldErrors.incidentDateLocal ? "true" : undefined}
-                      aria-describedby={
-                        step5FieldErrors.incidentDateLocal ? "wizard-incident-date-error" : undefined
-                      }
-                      className="tabular-nums w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-base text-text-primary"
+                      aria-invalid={fieldErrors.incidentDateLocal ? "true" : undefined}
+                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-sm text-text-primary"
                     />
-                    {step5FieldErrors.incidentDateLocal && (
-                      <p
-                        id="wizard-incident-date-error"
-                        className="mt-1 mb-0 text-xs font-medium text-sos-text"
-                      >
-                        {step5FieldErrors.incidentDateLocal}
+                    {fieldErrors.incidentDateLocal && (
+                      <p className="mt-1 mb-0 text-xs font-medium text-sos-text">
+                        {fieldErrors.incidentDateLocal}
                       </p>
                     )}
                   </div>
@@ -1627,461 +1433,620 @@ export default function ComplaintWizardIsland() {
                   <div>
                     <label
                       htmlFor="wizard-incident-address"
-                      className="mb-1 block text-sm font-semibold text-text-primary"
+                      className="mb-1.5 block text-xs font-semibold text-text-primary"
                     >
-                      Dirección o referencia del hecho{" "}
-                      <span aria-hidden="true" className="text-sos">*</span>
+                      Dirección o referencia exacta del hecho *
                     </label>
                     <input
                       ref={incidentAddressInputRef}
                       id="wizard-incident-address"
-                      name="incident_address"
                       type="text"
+                      maxLength={255}
                       value={incidentAddress}
                       onChange={(e) => {
                         setIncidentAddress(e.target.value);
-                        clearStep5FieldError("incidentAddress");
+                        clearFieldError("incidentAddress");
                       }}
-                      onBlur={() => {
-                        if (incidentAddress.trim().length > 0) {
-                          const err = validateSingleStep5Field("incidentAddress", incidentAddress);
-                          if (err) {
-                            setStep5FieldErrors((prev) => ({ ...prev, incidentAddress: err }));
-                          }
-                        }
-                      }}
-                      required
-                      maxLength={255}
-                      placeholder="Ej. Calle Loa N.º 450, Zona Central, Sucre"
-                      aria-invalid={step5FieldErrors.incidentAddress ? "true" : undefined}
-                      aria-describedby={
-                        step5FieldErrors.incidentAddress ? "wizard-incident-address-error" : undefined
-                      }
-                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-base text-text-primary"
+                      placeholder="Ej. Calle Loa N.º 420, frente al mercado"
+                      aria-invalid={fieldErrors.incidentAddress ? "true" : undefined}
+                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted"
                     />
-                    {step5FieldErrors.incidentAddress && (
-                      <p
-                        id="wizard-incident-address-error"
-                        className="mt-1 mb-0 text-xs font-medium text-sos-text"
-                      >
-                        {step5FieldErrors.incidentAddress}
+                    {fieldErrors.incidentAddress && (
+                      <p className="mt-1 mb-0 text-xs font-medium text-sos-text">
+                        {fieldErrors.incidentAddress}
                       </p>
                     )}
                   </div>
                 </div>
 
-                <IncidentLocationPicker
-                  latitude={latitude}
-                  longitude={longitude}
-                  disabled={savingDraft}
-                  onChange={({ latitude: nextLat, longitude: nextLng }) => {
-                    setLatitude(nextLat);
-                    setLongitude(nextLng);
-                  }}
-                />
+                <div className="rounded-2xl border border-border bg-bg-canvas p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <MapPin aria-hidden="true" className="h-4 w-4 text-primary" />
+                      <div>
+                        <p className="m-0 text-xs font-semibold text-text-primary">
+                          Ubicación GPS en mapa (Opcional)
+                        </p>
+                        <p className="tabular-nums m-0 text-[11px] text-text-secondary">
+                          {latitude !== null && longitude !== null
+                            ? `Pin fijado: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+                            : "Ayuda a localizar el punto exacto en Sucre si la dirección no es precisa."}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      aria-expanded={mapExpanded}
+                      onClick={() => setMapExpanded((prev) => !prev)}
+                      className="inline-flex min-h-[38px] cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-bg-surface px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-soft"
+                    >
+                      <span>{mapExpanded ? "Ocultar mapa" : "Abrir mapa GPS"}</span>
+                      <ChevronDown
+                        aria-hidden="true"
+                        className={`h-4 w-4 transition-transform ${mapExpanded ? "rotate-180" : ""}`}
+                      />
+                    </button>
+                  </div>
+
+                  {mapExpanded && (
+                    <div className="mt-3">
+                      <IncidentLocationPicker
+                        latitude={latitude}
+                        longitude={longitude}
+                        onChange={({ latitude: lat, longitude: lng }) => {
+                          setLatitude(lat);
+                          setLongitude(lng);
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
 
                 <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
                     <label
                       htmlFor="wizard-description"
-                      className="block text-sm font-semibold text-text-primary"
+                      className="text-xs font-semibold text-text-primary"
                     >
-                      Relato circunstanciado de los hechos{" "}
-                      <span aria-hidden="true" className="text-sos">*</span>
+                      Relato objetivo de los hechos *
                     </label>
-                    <span className="tabular-nums text-xs text-text-secondary">
-                      {description.trim().length} / 5000
+                    <span className="tabular-nums text-[11px] text-text-secondary">
+                      {description.trim().length}/5000
                     </span>
                   </div>
-                  <p id="wizard-description-hint" className="mt-0 mb-1.5 text-xs text-text-secondary">
-                    Describe qué ocurrió, cuántos animales están afectados, estado aparente y si hay
-                    personas responsables identificables.
-                  </p>
                   <textarea
                     ref={descriptionInputRef}
                     id="wizard-description"
-                    name="description"
-                    rows={5}
+                    rows={4}
+                    maxLength={5000}
                     value={description}
                     onChange={(e) => {
                       setDescription(e.target.value);
-                      clearStep5FieldError("description");
+                      clearFieldError("description");
                     }}
-                    onBlur={() => {
-                      if (description.trim().length > 0) {
-                        const err = validateSingleStep5Field("description", description);
-                        if (err) {
-                          setStep5FieldErrors((prev) => ({ ...prev, description: err }));
-                        }
-                      }
-                    }}
-                    minLength={10}
-                    maxLength={5000}
-                    required
-                    aria-invalid={step5FieldErrors.description ? "true" : undefined}
-                    aria-describedby={
-                      step5FieldErrors.description
-                        ? "wizard-description-hint wizard-description-error"
-                        : "wizard-description-hint"
-                    }
-                    placeholder="Describe detalladamente los hechos observados..."
-                    className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-base leading-relaxed text-text-primary"
+                    placeholder="Describe qué ocurrió, cuántos animales están afectados, situación actual de riesgo y cualquier detalle verificable."
+                    aria-invalid={fieldErrors.description ? "true" : undefined}
+                    className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-sm leading-relaxed text-text-primary placeholder:text-text-muted"
                   />
-                  {step5FieldErrors.description && (
-                    <p
-                      id="wizard-description-error"
-                      className="mt-1 mb-0 text-xs font-medium text-sos-text"
-                    >
-                      {step5FieldErrors.description}
+                  {fieldErrors.description && (
+                    <p className="mt-1 mb-0 text-xs font-medium text-sos-text">
+                      {fieldErrors.description}
                     </p>
                   )}
                 </div>
-              </fieldset>
 
-              <section className="space-y-4 rounded-2xl border border-border bg-bg-canvas p-4 sm:p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="m-0 font-display text-sm font-bold text-text-primary">
-                      Evidencias adjuntas (opcional, recomendado)
-                    </h2>
-                    <p className="mt-0.5 mb-0 text-xs text-text-secondary">
-                      Formatos permitidos: JPG, PNG, WEBP, MP4 o PDF (máximo 25 MB por archivo).
-                    </p>
+                <div className="rounded-2xl border border-border bg-bg-canvas p-4 sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Camera aria-hidden="true" className="h-4 w-4 text-primary" />
+                        <h3 className="m-0 font-display text-sm font-bold text-text-primary">
+                          Anexo Fotográfico ({MIN_PHOTOS_PER_COMPLAINT} a {MAX_PHOTOS_PER_COMPLAINT} fotografías) *
+                        </h3>
+                      </div>
+                      <p className="mt-1 mb-0 text-xs leading-relaxed text-text-secondary">
+                        Se incrustarán en la última página de tu Documento de Denuncia en PDF. Solo
+                        se permiten imágenes <strong>JPG, PNG o WEBP</strong> (máx. 25 MB c/u).
+                      </p>
+                    </div>
+
+                    <span
+                      className={`tabular-nums inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${
+                        evidences.length >= MIN_PHOTOS_PER_COMPLAINT
+                          ? "bg-secondary-soft text-secondary-text"
+                          : "bg-sos-soft text-sos-text"
+                      }`}
+                    >
+                      {evidences.length} / {MAX_PHOTOS_PER_COMPLAINT} listas
+                    </span>
                   </div>
 
-                  <div>
-                    <input
-                      id="wizard-evidence-upload"
-                      type="file"
-                      multiple
-                      disabled={savingDraft}
-                      accept=".jpg,.jpeg,.png,.webp,.mp4,.pdf,image/jpeg,image/png,image/webp,video/mp4,application/pdf"
-                      onChange={handleEvidenceFileSelection}
-                      className="peer sr-only"
-                    />
+                  <div className="mt-4">
                     <label
-                      htmlFor="wizard-evidence-upload"
-                      className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl border border-primary/30 bg-bg-surface px-4 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary-soft peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-disabled:cursor-not-allowed peer-disabled:opacity-60"
+                      htmlFor="photo-annex-input"
+                      className={[
+                        "flex min-h-[76px] w-full flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed p-4 text-center transition-colors",
+                        evidences.length >= MAX_PHOTOS_PER_COMPLAINT || savingDraft
+                          ? "cursor-not-allowed border-border bg-bg-surface/60 text-text-muted"
+                          : "cursor-pointer border-primary/40 bg-bg-surface text-text-primary hover:border-primary hover:bg-primary-soft/30",
+                      ].join(" ")}
                     >
-                      <Upload aria-hidden="true" className="h-4 w-4" />
-                      <span>Adjuntar archivos</span>
+                      <Upload aria-hidden="true" className="h-5 w-5 text-primary" />
+                      <span className="text-xs font-semibold sm:text-sm">
+                        {evidences.length >= MAX_PHOTOS_PER_COMPLAINT
+                          ? "Cupo completo (3 de 3 fotografías)"
+                          : "Seleccionar o tomar fotografías (JPG, PNG, WEBP)"}
+                      </span>
+                      <span className="text-[11px] text-text-secondary">
+                        Al adjuntar la primera foto, tu borrador se guarda automáticamente.
+                      </span>
+                      <input
+                        id="photo-annex-input"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        multiple
+                        disabled={evidences.length >= MAX_PHOTOS_PER_COMPLAINT || savingDraft}
+                        onChange={handlePhotoSelection}
+                        className="sr-only"
+                      />
                     </label>
                   </div>
-                </div>
 
-                {uploadQueue.length > 0 && (
-                  <ul className="m-0 list-none space-y-2 p-0">
-                    {uploadQueue.map((item) => (
-                      <li
-                        key={item.localId}
-                        className="rounded-xl border border-border bg-bg-surface p-3"
-                      >
-                        <div className="flex items-center justify-between gap-2 text-xs">
-                          <span className="truncate-single-line font-semibold text-text-primary">
-                            {item.fileName}
-                          </span>
-                          <span className="tabular-nums shrink-0 text-text-secondary">
-                            {item.status === "uploading" ? `${item.progress}%` : "Error"}
-                          </span>
-                        </div>
-                        {item.status === "uploading" ? (
-                          <progress
-                            value={item.progress}
-                            max={100}
-                            aria-label={`Progreso de subida de ${item.fileName}`}
-                            className="mt-2 h-2 w-full accent-primary"
-                          />
-                        ) : (
-                          <div className="mt-1.5 flex items-center justify-between gap-2">
-                            <p className="m-0 text-xs font-medium text-sos-text">
+                  {uploadQueue.length > 0 && (
+                    <ul className="m-0 mt-3 list-none space-y-2 p-0">
+                      {uploadQueue.map((item) => (
+                        <li
+                          key={item.localId}
+                          className="rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate font-semibold text-text-primary">
+                              {item.fileName}
+                            </span>
+                            {item.status === "uploading" ? (
+                              <span className="tabular-nums font-bold text-primary">
+                                {item.progress}%
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setUploadQueue((prev) =>
+                                    prev.filter((row) => row.localId !== item.localId),
+                                  )
+                                }
+                                className="cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-sos-text underline"
+                              >
+                                Descartar
+                              </button>
+                            )}
+                          </div>
+                          {item.status === "uploading" ? (
+                            <progress
+                              aria-label={`Subiendo ${item.fileName}`}
+                              value={item.progress}
+                              max={100}
+                              className="mt-2 h-2 w-full accent-primary"
+                            />
+                          ) : (
+                            <p className="mt-1 mb-0 text-xs font-medium text-sos-text">
                               {item.errorMessage}
                             </p>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setUploadQueue((prev) =>
-                                  prev.filter((queued) => queued.localId !== item.localId),
-                                )
-                              }
-                              className="cursor-pointer text-xs font-semibold text-text-secondary underline hover:text-text-primary"
-                            >
-                              Quitar aviso
-                            </button>
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
-                {evidences.length > 0 ? (
-                  <ul className="m-0 list-none space-y-2 p-0">
-                    {evidences.map((ev) => (
-                      <li
-                        key={ev.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-bg-surface px-3.5 py-2.5"
-                      >
-                        <div className="min-w-0">
-                          <p className="m-0 flex items-center gap-2 text-xs font-semibold text-text-primary">
-                            <span className="rounded bg-primary-soft px-2 py-0.5 text-[11px] font-bold text-primary">
-                              {ev.evidence_type}
-                            </span>
-                            <span className="truncate-single-line">{ev.object_key}</span>
-                          </p>
-                          <p className="tabular-nums mt-0.5 mb-0 text-[11px] text-text-secondary">
-                            {ev.mime_type} · {formatFileSize(ev.file_size_bytes)}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={removingEvidenceId === ev.id}
-                          onClick={() => handleRemoveEvidence(ev.id)}
-                          aria-label={`Eliminar evidencia ${ev.object_key}`}
-                          className="inline-flex min-h-[40px] shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-sos-text hover:bg-sos-soft disabled:opacity-60"
-                        >
-                          <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
-                          <span>Quitar</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="m-0 text-xs text-text-secondary">
-                    Aún no hay archivos adjuntos. Si tienes fotos, videos o informes, súbelos aquí.
-                  </p>
-                )}
-              </section>
+                  {evidences.length > 0 && (
+                    <ul className="m-0 mt-4 grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-3">
+                      {evidences.map((ev, idx) => {
+                        const thumbUrl = localThumbnails[ev.id];
+                        return (
+                          <li
+                            key={ev.id}
+                            className="flex flex-col justify-between rounded-2xl border border-border bg-bg-surface p-3 shadow-xs"
+                          >
+                            {thumbUrl ? (
+                              <img
+                                src={thumbUrl}
+                                alt={`Fotografía adjunta ${idx + 1}`}
+                                className="h-28 w-full rounded-xl bg-bg-canvas object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-28 w-full flex-col items-center justify-center rounded-xl bg-bg-canvas text-text-secondary">
+                                <Camera aria-hidden="true" className="h-6 w-6 text-primary" />
+                                <span className="mt-1 text-[11px] font-semibold">
+                                  Foto {idx + 1} guardada
+                                </span>
+                              </div>
+                            )}
 
-              {stepStatusMessage && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="flex items-start gap-2.5 rounded-2xl border border-secondary/30 bg-secondary-soft p-4 text-sm font-medium text-secondary-text"
-                >
-                  <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{stepStatusMessage}</span>
+                            <div className="mt-2.5 flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="m-0 truncate text-xs font-bold text-text-primary">
+                                  Fotografía {idx + 1}
+                                </p>
+                                <p className="tabular-nums m-0 text-[11px] text-text-secondary">
+                                  {ev.mime_type.replace("image/", "").toUpperCase()} ·{" "}
+                                  {formatFileSize(ev.file_size_bytes)}
+                                </p>
+                              </div>
+
+                              <button
+                                type="button"
+                                aria-label={`Quitar fotografía ${idx + 1}`}
+                                disabled={removingEvidenceId === ev.id}
+                                onClick={() => handleRemoveEvidence(ev.id)}
+                                className="inline-flex min-h-[36px] min-w-[36px] cursor-pointer items-center justify-center rounded-lg border border-sos/30 bg-bg-surface text-sos-text hover:bg-sos-soft disabled:opacity-50"
+                              >
+                                <Trash2 aria-hidden="true" className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
-              )}
+              </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={savingDraft || isUploadingAny}
-                  onClick={() => goToStep(4)}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-bg-canvas disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  <span>Anterior</span>
-                </button>
-
-                <div className="flex flex-wrap items-center gap-2.5">
+              <div className="mt-7 flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap gap-2.5">
                   <button
                     type="button"
-                    disabled={savingDraft || isUploadingAny}
+                    onClick={() => goToStep(1)}
+                    className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-bg-surface px-4 py-2 text-sm font-semibold text-text-primary hover:bg-bg-canvas"
+                  >
+                    <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                    <span>Atrás</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={savingDraft}
                     onClick={handleSaveDraftClick}
-                    className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl border border-primary/30 bg-primary-soft px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-bg-canvas px-4 py-2 text-sm font-semibold text-text-primary hover:bg-primary-soft hover:text-primary disabled:opacity-60"
                   >
                     <Save aria-hidden="true" className="h-4 w-4" />
                     <span>{savingDraft ? "Guardando..." : "Guardar borrador"}</span>
                   </button>
-
-                  <button
-                    type="submit"
-                    disabled={savingDraft || isUploadingAny}
-                    className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <span>
-                      {isUploadingAny
-                        ? "Esperando subida..."
-                        : savingDraft
-                          ? "Guardando..."
-                          : "Siguiente: Previsualizar documento"}
-                    </span>
-                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                  </button>
                 </div>
+
+                <button
+                  type="button"
+                  disabled={savingDraft}
+                  onClick={handleContinueToStep3}
+                  className="inline-flex min-h-[48px] cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60"
+                >
+                  <span>Continuar a Revisión</span>
+                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                </button>
               </div>
-            </form>
+            </section>
           )}
 
-          {step === 6 && (
-            <div className="space-y-6">
-              <div>
-                <h1
+          {step === 3 && (
+            <section className="rounded-3xl border border-border bg-bg-surface p-5 shadow-xs sm:p-7">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2
                   ref={stepHeadingRef}
                   tabIndex={-1}
-                  className="m-0 font-display text-xl font-bold text-text-primary sm:text-2xl"
+                  className="m-0 font-display text-xl font-bold text-text-primary focus:outline-none sm:text-2xl"
                 >
-                  6. Previsualización del Documento de Denuncia
-                </h1>
-                <p className="mt-2 text-sm text-text-secondary">
-                  Revisa el contenido completo antes de confirmar el envío definitivo. Mientras no
-                  confirmes, tu caso sigue en estado <strong>BORRADOR</strong> y puedes volver a
-                  editarlo.
-                </p>
+                  3. Tus Datos Legales y Vista Previa
+                </h2>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${
+                    isProfileComplete
+                      ? "bg-secondary-soft text-secondary-text"
+                      : "bg-sos-soft text-sos-text"
+                  }`}
+                >
+                  {isProfileComplete ? "Identidad completa" : "Completa tu identidad"}
+                </span>
               </div>
 
-              {loadingPreview ? (
-                <div className="rounded-2xl border border-border bg-bg-canvas p-8 text-center">
-                  <p className="m-0 text-sm font-medium text-text-secondary">
-                    Generando vista previa oficial del Documento de Denuncia...
-                  </p>
-                </div>
-              ) : previewData ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2 text-xs text-text-secondary">
-                    <span className="font-semibold text-text-primary">{previewData.title}</span>
-                    <button
-                      type="button"
-                      onClick={handleReloadPreview}
-                      className="cursor-pointer font-semibold text-primary underline"
-                    >
-                      Actualizar vista previa
-                    </button>
+              <form onSubmit={handleRefreshProfileAndPreview} className="mt-5 rounded-2xl border border-border bg-bg-canvas p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="m-0 font-display text-sm font-bold text-text-primary">
+                      Identificación del Denunciante
+                    </h3>
+                    <p className="mt-0.5 mb-0 text-xs text-text-secondary">
+                      Requerida por la Ley N.º 700/2015 para emitir el Documento de Denuncia en PDF.
+                    </p>
                   </div>
-                  <iframe
-                    sandbox=""
-                    srcDoc={previewData.html_preview}
-                    title="Vista previa del Documento de Denuncia"
-                    className="h-[520px] w-full rounded-2xl border border-border bg-white shadow-xs"
-                  />
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-border bg-bg-canvas p-6 text-center">
+
+                <div className="mt-4 grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="wizard-full-name" className="mb-1 block text-xs font-semibold text-text-primary">
+                      Nombre completo *
+                    </label>
+                    <input
+                      ref={fullNameInputRef}
+                      id="wizard-full-name"
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => {
+                        setFullName(e.target.value);
+                        clearFieldError("fullName");
+                      }}
+                      aria-invalid={fieldErrors.fullName ? "true" : undefined}
+                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-sm text-text-primary"
+                    />
+                    {fieldErrors.fullName && (
+                      <p className="mt-1 mb-0 text-xs font-medium text-sos-text">{fieldErrors.fullName}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="wizard-ci" className="mb-1 block text-xs font-semibold text-text-primary">
+                      Cédula de Identidad (C.I.) *
+                    </label>
+                    <input
+                      ref={ciInputRef}
+                      id="wizard-ci"
+                      type="text"
+                      value={ciNumber}
+                      placeholder="Ej. 7482910 CH"
+                      onChange={(e) => {
+                        setCiNumber(e.target.value);
+                        clearFieldError("ciNumber");
+                      }}
+                      aria-invalid={fieldErrors.ciNumber ? "true" : undefined}
+                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted"
+                    />
+                    {fieldErrors.ciNumber && (
+                      <p className="mt-1 mb-0 text-xs font-medium text-sos-text">{fieldErrors.ciNumber}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="wizard-phone" className="mb-1 block text-xs font-semibold text-text-primary">
+                      Teléfono / WhatsApp *
+                    </label>
+                    <input
+                      ref={phoneInputRef}
+                      id="wizard-phone"
+                      type="tel"
+                      value={phone}
+                      placeholder="Ej. +591 71234567"
+                      onChange={(e) => {
+                        setPhone(e.target.value);
+                        clearFieldError("phone");
+                      }}
+                      aria-invalid={fieldErrors.phone ? "true" : undefined}
+                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted"
+                    />
+                    {fieldErrors.phone && (
+                      <p className="mt-1 mb-0 text-xs font-medium text-sos-text">{fieldErrors.phone}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="wizard-domicile" className="mb-1 block text-xs font-semibold text-text-primary">
+                      Domicilio actual en Sucre *
+                    </label>
+                    <input
+                      ref={domicileInputRef}
+                      id="wizard-domicile"
+                      type="text"
+                      value={domicileAddress}
+                      placeholder="Ej. Av. Hernando Siles 350, Zona Central"
+                      onChange={(e) => {
+                        setDomicileAddress(e.target.value);
+                        clearFieldError("domicileAddress");
+                      }}
+                      aria-invalid={fieldErrors.domicileAddress ? "true" : undefined}
+                      className="w-full rounded-xl border border-border bg-bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted"
+                    />
+                    {fieldErrors.domicileAddress && (
+                      <p className="mt-1 mb-0 text-xs font-medium text-sos-text">
+                        {fieldErrors.domicileAddress}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-end">
                   <button
-                    type="button"
-                    onClick={handleReloadPreview}
-                    className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white"
+                    type="submit"
+                    disabled={savingProfile || loadingPreview}
+                    className="inline-flex min-h-[40px] cursor-pointer items-center gap-1.5 rounded-xl border border-primary/30 bg-bg-surface px-4 py-2 text-xs font-semibold text-primary hover:bg-primary-soft disabled:opacity-60"
                   >
-                    Cargar vista previa
+                    <Save aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>
+                      {savingProfile || loadingPreview
+                        ? "Actualizando vista previa..."
+                        : "Guardar datos y actualizar vista previa"}
+                    </span>
                   </button>
                 </div>
-              )}
+              </form>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => goToStep(5)}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-bg-canvas"
-                >
-                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  <span>Volver a editar datos</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={!draftComplaint || loadingPreview}
-                  onClick={openSubmitDialog}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-sos px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Lock aria-hidden="true" className="h-4 w-4" />
-                  <span>Confirmar y enviar denuncia definitiva</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 7 && submittedComplaint && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-secondary/30 bg-secondary-soft p-6">
-                <div className="flex items-start gap-3">
-                  <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-white">
-                    <CheckCircle2 aria-hidden="true" className="h-6 w-6" />
+              <div className="mt-6">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="m-0 font-display text-sm font-bold text-text-primary">
+                    Vista Previa Oficial (incluye Anexo Fotográfico)
+                  </h3>
+                  <span className="tabular-nums text-xs text-text-secondary">
+                    {evidences.length} fotografía(s) incrustadas
                   </span>
-                  <div>
-                    <h1
-                      ref={stepHeadingRef}
-                      tabIndex={-1}
-                      className="m-0 font-display text-xl font-bold text-text-primary sm:text-2xl"
-                    >
-                      7. Denuncia enviada y bloqueada jurídicamente
-                    </h1>
-                    <p className="mt-1.5 mb-0 text-sm text-text-primary">
-                      Tu <strong>Documento de Denuncia</strong> en PDF ha sido generado, congelado
-                      como inmutable y registrado con éxito.
-                    </p>
-                  </div>
                 </div>
 
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-secondary/30 bg-bg-surface p-4">
-                  <div>
-                    <p className="m-0 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                      Código correlativo de seguimiento
-                    </p>
-                    <p className="tabular-nums mt-1 mb-0 font-display text-2xl font-bold text-primary">
-                      {submittedComplaint.tracking_code}
-                    </p>
+                {loadingPreview ? (
+                  <div className="flex min-h-[340px] items-center justify-center rounded-2xl border border-border bg-bg-canvas p-6 text-sm text-text-secondary">
+                    Generando vista previa del Documento de Denuncia con tus fotografías...
                   </div>
+                ) : previewData ? (
+                  <iframe
+                    title="Vista previa oficial del Documento de Denuncia"
+                    srcDoc={previewData.html_preview}
+                    sandbox=""
+                    className="h-[460px] w-full rounded-2xl border border-border bg-white shadow-inner sm:h-[540px]"
+                  />
+                ) : (
+                  <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-bg-canvas p-6 text-center">
+                    <p className="m-0 text-sm text-text-secondary">
+                      Actualiza tus datos para renderizar el Documento de Denuncia.
+                    </p>
+                    {draftComplaint && (
+                      <button
+                        type="button"
+                        onClick={() => void loadHtmlPreview(draftComplaint.id)}
+                        className="inline-flex min-h-[40px] cursor-pointer items-center rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-primary-hover"
+                      >
+                        Cargar vista previa
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-7 flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  type="button"
+                  onClick={() => goToStep(2)}
+                  className="inline-flex min-h-[44px] cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-bg-surface px-4 py-2 text-sm font-semibold text-text-primary hover:bg-bg-canvas"
+                >
+                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                  <span>Editar hechos o fotos</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={savingProfile || submittingFinal}
+                  onClick={handleRequestSubmitDialog}
+                  className="inline-flex min-h-[48px] cursor-pointer items-center justify-center gap-2 rounded-xl bg-sos px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-95 disabled:opacity-60"
+                >
+                  <ShieldAlert aria-hidden="true" className="h-4 w-4" />
+                  <span>Emitir Documento de Denuncia (PDF)</span>
+                </button>
+              </div>
+            </section>
+          )}
+
+          {step === 4 && submittedComplaint && (
+            <section className="rounded-3xl border border-secondary/35 bg-bg-surface p-5 shadow-xs sm:p-8">
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-secondary-soft text-secondary-text">
+                  <CheckCircle2 aria-hidden="true" className="h-6 w-6" />
+                </span>
+                <div>
+                  <p className="m-0 text-xs font-bold uppercase tracking-wide text-secondary-text">
+                    Documento Emitido e Inmutable
+                  </p>
+                  <h2
+                    ref={stepHeadingRef}
+                    tabIndex={-1}
+                    className="mt-0.5 mb-0 font-display text-2xl font-bold text-text-primary focus:outline-none"
+                  >
+                    Tu Documento de Denuncia está listo
+                  </h2>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-border bg-bg-canvas p-5">
+                <p className="m-0 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                  Código correlativo de referencia del documento
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <span className="tabular-nums font-display text-2xl font-extrabold tracking-tight text-primary">
+                    {submittedComplaint.tracking_code ?? "Emitido"}
+                  </span>
                   {submittedComplaint.tracking_code && (
                     <button
                       type="button"
-                      onClick={() => handleCopyTrackingCode(submittedComplaint.tracking_code ?? "")}
-                      className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-bg-canvas px-4 py-2 text-xs font-semibold text-text-primary hover:bg-primary-soft hover:text-primary"
+                      onClick={() => handleCopyCode(submittedComplaint.tracking_code ?? "")}
+                      className="inline-flex min-h-[38px] cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-primary-soft hover:text-primary"
                     >
-                      <Copy aria-hidden="true" className="h-4 w-4" />
-                      <span>{copiedCode ? "Código copiado" : "Copiar código"}</span>
+                      <Copy aria-hidden="true" className="h-3.5 w-3.5" />
+                      <span>{copiedCode ? "Copiado" : "Copiar código"}</span>
                     </button>
                   )}
                 </div>
-                <p role="status" aria-live="polite" className="visually-hidden">
-                  {copiedCode ? "Código de seguimiento copiado al portapapeles." : ""}
+                <p className="mt-2 mb-0 text-xs text-text-secondary">
+                  Incluye el cuerpo formal con sustento jurídico y{" "}
+                  <strong className="tabular-nums">{evidences.length} fotografía(s)</strong> en la
+                  página final de Anexo Fotográfico.
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-3">
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <button
                   type="button"
                   disabled={downloadingPdf}
                   onClick={() => handleDownloadPdf(submittedComplaint.id)}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60"
+                  className="inline-flex min-h-[50px] cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60"
                 >
-                  <Download aria-hidden="true" className="h-4 w-4" />
+                  <Download aria-hidden="true" className="h-5 w-5" />
                   <span>
                     {downloadingPdf
-                      ? "Generando enlace seguro..."
+                      ? "Generando descarga..."
                       : "Descargar Documento de Denuncia (PDF)"}
                   </span>
                 </button>
 
-                {submittedComplaint.tracking_code && (
-                  <a
-                    href={`/seguimiento?code=${encodeURIComponent(submittedComplaint.tracking_code)}`}
-                    className="inline-flex min-h-[48px] items-center rounded-xl border border-border bg-bg-surface px-4 py-3 text-sm font-semibold text-text-primary no-underline hover:bg-bg-canvas"
-                  >
-                    Ver seguimiento público
-                  </a>
-                )}
-
                 <a
                   href="/mis-denuncias"
-                  className="inline-flex min-h-[48px] items-center rounded-xl border border-border bg-bg-surface px-4 py-3 text-sm font-semibold text-text-primary no-underline hover:bg-bg-canvas"
+                  className="inline-flex min-h-[50px] items-center justify-center rounded-xl border border-border bg-bg-surface px-5 py-3 text-sm font-semibold text-text-primary no-underline hover:bg-bg-canvas"
                 >
-                  Ir a Mis Denuncias
+                  Ver en Mis Denuncias
                 </a>
+              </div>
 
+              <div className="mt-6 rounded-2xl border border-primary/20 bg-primary-soft/45 p-5">
+                <h3 className="m-0 font-display text-sm font-bold text-text-primary">
+                  ¿Cómo presentar este PDF ante las autoridades en Sucre?
+                </h3>
+                <ol className="mt-2.5 mb-0 list-decimal space-y-1.5 pl-4 text-xs leading-relaxed text-text-secondary">
+                  <li>
+                    Descarga e imprime el <strong>Documento de Denuncia</strong> completo (incluye el Anexo Fotográfico al final).
+                  </li>
+                  <li>
+                    Firma el documento al pie de página junto con tu Cédula de Identidad antes de entregarlo.
+                  </li>
+                  <li>
+                    Preséntalo directamente ante <strong>POFOMA</strong>, el{" "}
+                    <strong>Ministerio Público (Fiscalía)</strong> o <strong>CEMZOO Sucre</strong>.
+                    SOS Animal no realiza seguimiento procesal posterior dentro de la plataforma.
+                  </li>
+                </ol>
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+                <a
+                  href="/mapa"
+                  className="text-xs font-semibold text-secondary-text no-underline hover:underline"
+                >
+                  Ver Veterinarias y Zoonosis cercanas →
+                </a>
                 <button
                   type="button"
-                  onClick={handleStartNewComplaint}
-                  className="inline-flex min-h-[48px] cursor-pointer items-center rounded-xl border border-primary/30 bg-primary-soft px-4 py-3 text-sm font-semibold text-primary hover:bg-primary/15"
+                  onClick={handleStartAnother}
+                  className="inline-flex min-h-[40px] cursor-pointer items-center rounded-xl border border-border bg-bg-canvas px-4 py-2 text-xs font-semibold text-text-primary hover:bg-primary-soft hover:text-primary"
                 >
-                  Iniciar otra denuncia
+                  Redactar nueva denuncia
                 </button>
               </div>
-            </div>
+            </section>
           )}
-        </section>
+        </div>
 
-        <aside className="min-w-0 space-y-4 lg:sticky lg:top-24">
-          <div className="rounded-3xl border border-primary/20 bg-primary-soft p-5">
+        <aside className="hidden space-y-4 lg:sticky lg:top-24 lg:col-span-5 lg:block xl:col-span-4">
+          <div className="rounded-3xl border border-primary/20 bg-primary-soft/60 p-5">
             <div className="flex items-center gap-2 text-primary">
-              <Scale aria-hidden="true" className="h-5 w-5" />
-              <h2 className="m-0 font-display text-base font-bold text-text-primary">
-                Sustento Legal Detectado
+              <Scale aria-hidden="true" className="h-4 w-4 shrink-0" />
+              <h2 className="m-0 font-display text-sm font-bold">
+                Sustento Legal Aplicable
               </h2>
             </div>
 
             {selectedCategory ? (
-              <div className="mt-3 space-y-2.5 text-sm">
+              <div className="mt-3 space-y-2 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <span
                     className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
@@ -2099,18 +2064,18 @@ export default function ComplaintWizardIsland() {
                 </p>
               </div>
             ) : selectedMainType ? (
-              <div className="mt-3 space-y-1.5 text-xs leading-relaxed text-text-primary">
+              <div className="mt-3 space-y-1 text-xs">
                 <p className="m-0 font-semibold text-primary">
                   {OFFENSE_MAIN_TYPE_META[selectedMainType].article}
                 </p>
                 <p className="m-0 text-text-secondary">
-                  Selecciona la modalidad específica en el Paso 3 para completar la tipificación.
+                  Elige la modalidad específica para completar el encuadre legal.
                 </p>
               </div>
             ) : (
               <p className="mt-3 mb-0 text-xs leading-relaxed text-text-secondary">
-                Conforme avances por los pasos 2 y 3, aquí se vincularán los artículos de la Ley N.º
-                700/2015, el Código Penal (Arts. 350 bis y 350 ter) y la Ley Municipal N.º 252/2022.
+                Selecciona el tipo de hecho en el Paso 1 para vincular Ley N.º 700/2015, Código
+                Penal Arts. 350 bis / 350 ter y Ley Municipal N.º 252/2022.
               </p>
             )}
           </div>
@@ -2120,11 +2085,11 @@ export default function ComplaintWizardIsland() {
               <div className="flex items-center gap-2">
                 <FileText aria-hidden="true" className="h-4 w-4 text-primary" />
                 <h2 className="m-0 font-display text-sm font-bold text-text-primary">
-                  Vista Previa en Vivo · Documento de Denuncia
+                  Resumen · Documento de Denuncia
                 </h2>
               </div>
               <span className="rounded-full bg-bg-canvas px-2 py-0.5 text-[11px] font-semibold text-text-secondary">
-                {submittedComplaint ? "INMUTABLE" : "BORRADOR"}
+                {submittedComplaint ? "EMITIDO" : "BORRADOR"}
               </span>
             </div>
 
@@ -2149,30 +2114,22 @@ export default function ComplaintWizardIsland() {
               </div>
 
               <div>
-                <dt className="font-semibold text-text-secondary">Fecha y lugar del hecho</dt>
+                <dt className="font-semibold text-text-secondary">Fecha y lugar</dt>
                 <dd className="tabular-nums m-0 mt-0.5 text-text-primary">
-                  {formatLocalDateTimeInputDisplay(incidentDateLocal)}
-                  {" · "}
-                  {incidentAddress.trim() || "Dirección por completar"}
+                  {formatLocalDateTimeInputDisplay(incidentDateLocal)} ·{" "}
+                  {incidentAddress.trim() || "Por completar"}
                 </dd>
                 {latitude !== null && longitude !== null && (
                   <dd className="tabular-nums m-0 mt-0.5 text-[11px] text-secondary-text">
-                    GPS: {latitude.toFixed(6)}, {longitude.toFixed(6)}
+                    GPS: {latitude.toFixed(5)}, {longitude.toFixed(5)}
                   </dd>
                 )}
               </div>
 
               <div>
-                <dt className="font-semibold text-text-secondary">Relato</dt>
-                <dd className="m-0 mt-0.5 line-clamp-4 whitespace-pre-wrap text-text-primary">
-                  {description.trim() || "El relato aparecerá aquí conforme lo redactes en el Paso 5."}
-                </dd>
-              </div>
-
-              <div>
-                <dt className="font-semibold text-text-secondary">Evidencias registradas</dt>
+                <dt className="font-semibold text-text-secondary">Anexo Fotográfico</dt>
                 <dd className="tabular-nums m-0 mt-0.5 text-text-primary">
-                  {evidences.length} archivo(s) adjunto(s)
+                  {evidences.length} / {MAX_PHOTOS_PER_COMPLAINT} fotografía(s)
                 </dd>
               </div>
             </dl>
@@ -2201,20 +2158,20 @@ export default function ComplaintWizardIsland() {
           </span>
           <div>
             <h2 id="confirm-submit-title" className="m-0 font-display text-lg font-bold text-text-primary">
-              ¿Confirmar envío definitivo de la denuncia?
+              ¿Emitir el Documento de Denuncia definitivo?
             </h2>
             <p className="mt-2 mb-0 text-sm leading-relaxed text-text-secondary">
-              Al confirmar, la denuncia pasará a estado <strong>ENVIADA</strong>, se generará el{" "}
-              <strong>Documento de Denuncia</strong> en PDF con código correlativo único y el caso
-              quedará <strong>inmutable</strong> (ya no podrá modificarse ni eliminarse).
+              Se generará el PDF oficial de tu <strong>Documento de Denuncia</strong> con código
+              correlativo único y tus <strong>{evidences.length} fotografía(s)</strong> incrustadas en
+              el Anexo Fotográfico. Luego no podrá modificarse ni eliminarse.
             </p>
           </div>
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-2.5">
           <button
+            ref={cancelConfirmButtonRef}
             type="button"
-            autoFocus
             disabled={submittingFinal}
             onClick={closeSubmitDialog}
             className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl border border-border bg-bg-surface px-4 py-2 text-sm font-semibold text-text-primary hover:bg-bg-canvas disabled:opacity-60"
@@ -2229,7 +2186,7 @@ export default function ComplaintWizardIsland() {
             className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl bg-sos px-5 py-2 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-60"
           >
             <Lock aria-hidden="true" className="h-4 w-4" />
-            <span>{submittingFinal ? "Enviando denuncia..." : "Sí, enviar denuncia definitiva"}</span>
+            <span>{submittingFinal ? "Generando PDF..." : "Sí, emitir Documento de Denuncia"}</span>
           </button>
         </div>
       </dialog>
