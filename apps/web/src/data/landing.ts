@@ -95,12 +95,12 @@ export const COMPLAINT_PROCESS_STEPS: readonly ProcessStep[] = [
 
 export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
   {
-    category: "Zoonosis y Veterinarias",
-    title: "Encuentra veterinarias de urgencia y CEMZOO",
+    category: "Centros de Atención",
+    title: "Centros de atención veterinaria y dónde denunciar",
     description:
-      "Consulta el mapa interactivo con horarios de atención y distancia aproximada desde tu ubicación en Sucre.",
+      "Consulta el mapa interactivo con CEMZOO, clínicas veterinarias con urgencias e instituciones públicas receptoras de denuncias en Sucre.",
     href: "/mapa",
-    ctaLabel: "Explorar mapa veterinario",
+    ctaLabel: "Explorar centros de atención",
     accent: "secondary",
     image: {
       src: "/images/community-vet.webp",

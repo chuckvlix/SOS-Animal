@@ -1,0 +1,74 @@
+---
+import CentersMapIsland from "../islands/CentersMapIsland";
+import MainLayout from "../layouts/MainLayout.astro";
+---
+
+<MainLayout
+  title="Centros de Atención"
+  description="Directorio georreferenciado y mapa interactivo de CEMZOO, centros de atención veterinaria e instituciones públicas donde denunciar el maltrato animal en Sucre, Bolivia."
+>
+  <div class="space-y-8">
+    {/* Page Header with University Verified Text */}
+    <header class="space-y-4 rounded-3xl bg-gradient-to-br from-brand-secondary/10 via-white to-brand-primary/5 p-6 sm:p-8 lg:p-10 border border-teal-100/80 shadow-xs">
+      <div class="inline-flex items-center gap-2 rounded-full bg-brand-secondary/15 px-3.5 py-1 text-xs font-bold text-brand-secondary">
+        <span class="h-2 w-2 rounded-full bg-brand-secondary animate-pulse"></span>
+        Red Oficial de Atención y Denuncia · Sucre
+      </div>
+
+      <h1 class="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl lg:text-4xl">
+        Centros de Atención Veterinaria y Lugares de Denuncia
+      </h1>
+
+      <p class="max-w-3xl text-sm leading-relaxed text-slate-700 sm:text-base">
+        La protección animal también implica saber dónde acudir cuando un animal se encuentra en situación de maltrato, abandono, peligro o necesita atención médica.
+        En Sucre existen centros donde puedes denunciar actos de maltrato animal, así como lugares donde pueden recibir atención veterinaria de emergencia o cuidado médico.
+      </p>
+
+      {/* Quick Summary Highlights */}
+      <div class="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="flex items-center gap-3 rounded-2xl bg-white/80 p-3.5 border border-slate-200/80 shadow-2xs">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-brand-secondary font-black text-sm">
+            01
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-slate-900">CEMZOO Sucre</h4>
+            <p class="text-[11px] text-slate-500">Zoonosis, vacunas y rescate</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 rounded-2xl bg-white/80 p-3.5 border border-slate-200/80 shadow-2xs">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-brand-secondary font-black text-sm">
+            02
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-slate-900">Clínicas Veterinarias</h4>
+            <p class="text-[11px] text-slate-500">Urgencias 24h y consultas</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 rounded-2xl bg-white/80 p-3.5 border border-slate-200/80 shadow-2xs">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-brand-sos font-black text-sm">
+            03
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-slate-900">Fiscalía Departamental</h4>
+            <p class="text-[11px] text-slate-500">Denuncia penal y biocidio</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 rounded-2xl bg-white/80 p-3.5 border border-slate-200/80 shadow-2xs">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-brand-sos font-black text-sm">
+            04
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-slate-900">FELCEDA — POFOMA</h4>
+            <p class="text-[11px] text-slate-500">Policía 110 y flagrancia</p>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    {/* Interactive Map and Directory Island */}
+    <CentersMapIsland client:only="react" />
+  </div>
+</MainLayout>

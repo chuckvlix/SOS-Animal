@@ -11,7 +11,6 @@ from app.modules.complaints.models import (  # noqa: F401
     ComplaintEvidence,
     OffenseCategory,
 )
-from app.modules.directory.models import AttentionCenter  # noqa: F401
 
 config = context.config
 

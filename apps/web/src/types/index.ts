@@ -6,8 +6,6 @@ export type ComplaintStatus = "BORRADOR" | "ENVIADA";
 
 export type EvidenceType = "FOTO";
 
-export type CenterCategory = "ZOONOSIS" | "VETERINARIA";
-
 export interface HealthResponse {
   status: string;
   service: string;
@@ -148,16 +146,7 @@ export interface ComplaintStatsRead {
   by_category: ComplaintCategoryStat[];
 }
 
-export interface AttentionCenterRead {
-  id: number;
-  name: string;
-  category: CenterCategory;
-  address: string;
-  latitude: number;
-  longitude: number;
-  phone: string | null;
-  opening_hours: string;
-  is_24_hours: boolean;
-  services: string;
-  is_active: boolean;
-}
+export type {
+  AttentionCenterItem,
+  CenterSectionType,
+} from "./centers";
