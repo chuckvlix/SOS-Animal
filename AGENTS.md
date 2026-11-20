@@ -2,7 +2,7 @@
 
 Este archivo define las reglas obligatorias de arquitectura, seguridad, tipado y flujo de trabajo para todos los agentes de codificación que operen en el monorepo **SOS Animal**. Antes de escribir o modificar código, consulta la documentación de referencia según tu tarea:
 
-* `docs/PROJECT_BRIEF.md`: Definiciones funcionales, institucionales, modelo de datos (5 tablas) y alcance por fases.
+* `docs/PROJECT_BRIEF.md`: Definiciones funcionales, institucionales, modelo de datos (4 tablas) y alcance por fases.
 * `docs/DESIGN_GUIDE.md`: Sistema de diseño UX/UI, *design tokens* de color, tipografía y especificaciones de componentes (consultar antes de tocar `apps/web` o `apps/mobile`).
 
 ---
@@ -48,8 +48,7 @@ apps/api/app/
 │   └── storage.py         # Cliente boto3/MinIO y generador de Presigned URLs
 ├── modules/
 │   ├── auth/              # Registro ligero, login OAuth2, perfilamiento progresivo y gestión de usuarios
-│   ├── complaints/        # Catálogo penal/municipal, borrador/emisión inmutable, anexo fotográfico y PDF
-│   └── directory/         # Zoonosis y veterinarias (CRUD + cálculo de distancia)
+│   └── complaints/        # Catálogo penal/municipal, borrador/emisión inmutable, anexo fotográfico y PDF
 └── templates/
     └── complaint_pdf.html # Plantilla HTML/CSS (con Anexo Fotográfico) renderizada por WeasyPrint
 ```
@@ -65,7 +64,7 @@ Cada carpeta de módulo debe contener exactamente:
 * **Control de Roles (RBAC):**
   * La plataforma es administrada únicamente por la Universidad.
   * Roles válidos: `ciudadano`, `admin` (superadministrador). No existen roles para instituciones externas.
-  * Todo endpoint administrativo (`POST`, `PUT`, `PATCH`, `DELETE` en `directory`, listado institucional de `complaints` y gestión de usuarios en `auth`) debe protegerse mediante `Depends(require_role(["admin"]))`.
+  * Todo endpoint administrativo (listado/estadísticas institucionales de `complaints` y gestión de usuarios en `auth`) debe protegerse mediante `Depends(require_role(["admin"]))`.
 * **Terminología Jurídica:** El documento generado en PDF debe titularse y tratarse siempre como **"Documento de Denuncia"** (nunca como *"Memorial"*, dado que los memoriales requieren firma de abogado).
 * **Ciclo e Inmutabilidad de Denuncias (Sin Seguimiento de Estados):**
   * Estados válidos de una denuncia: `BORRADOR` y `ENVIADA` (emitida con PDF definitivo). No existe flujo de seguimiento ni transición de estados posteriores en plataforma.
@@ -84,15 +83,15 @@ Cada carpeta de módulo debe contener exactamente:
 ### 4.1. Filosofía Astro + React Islands
 * **Páginas Públicas en Astro (`src/pages/`):**
   * `/`: Portada informativa con acceso directo SOS, ruta digital de 4 pasos, servicios ciudadanos y marco jurídico.
-  * `/mapa`: Directorio geolocalizado de Zoonosis y clínicas veterinarias con isla `VetMapIsland`.
+  * `/mapa`: Página **Centros de Atención** alimentada desde datos tipados verificados (`src/data/centers.ts`), dividida en 2 secciones (*CEMZOO y Centros de Atención Veterinaria* e *Instituciones Públicas donde Denunciar*) con mapa interactivo Leaflet (`CentersMapIsland`).
   * `/campanas`: Página **estática** con calendario de vacunación recomendado para mascotas, importancia de controles de salud y fechas aproximadas de campañas gratuitas municipales de vacunación antirrábica y esterilización.
   * `/normativa`: Página **estática** con resumen ciudadano de leyes y normas vigentes y botones de descarga directa de PDFs desde `public/docs/normativa/`.
   * `/educacion`: Página **estática** de tenencia responsable y prevención con descarga de folletos informativos en PDF segmentados por público (*escolares*, *colegiales*, *público general*) desde `public/docs/folletos/`.
 * **Layouts Diferenciados por Rol:**
   * **Portal Ciudadano (`MainLayout.astro`):** Barra de navegación superior en escritorio y barra inferior en móvil (sin sidebar lateral). Incluye botón explícito **`Cerrar sesión`** cuando hay sesión activa.
-  * **Panel Universitario (`PanelLayout.astro`):** Acceso exclusivo para el rol `admin` (los usuarios `ciudadano` tienen prohibido el acceso y son redirigidos a `/`). Implementa un **sidebar fijo a la izquierda** en escritorio y un *drawer* lateral en `<dialog>` para móvil, con vistas `/panel/denuncias` (registro histórico y estadístico), `/panel/veterinarias` (CRUD del directorio) y `/panel/usuarios` (gestión de usuarios).
+  * **Panel Universitario (`PanelLayout.astro`):** Acceso exclusivo para el rol `admin` (los usuarios `ciudadano` tienen prohibido el acceso y son redirigidos a `/`). Implementa un **sidebar fijo a la izquierda** en escritorio y un *drawer* lateral en `<dialog>` para móvil, con vistas `/panel/denuncias` (registro histórico y estadístico) y `/panel/usuarios` (gestión de usuarios).
 * **Islas de React (`src/islands/`):**
-  * Usar `client:only="react"` para componentes dependientes del navegador como el mapa de Leaflet (`VetMapIsland`), el asistente interactivo de **4 pasos** (`ComplaintWizardIsland`) y las vistas protegidas del panel (`AdminComplaintsTrayIsland`, `AdminUsersIsland`, `AdminVetsIsland`).
+  * Usar `client:only="react"` para componentes dependientes del navegador como el mapa de Leaflet (`CentersMapIsland`), el asistente interactivo de **4 pasos** (`ComplaintWizardIsland`) y las vistas protegidas del panel (`AdminComplaintsTrayIsland`, `AdminUsersIsland`).
   * Usar `client:load` para componentes interactivos ligeros.
 * **TypeScript Estricto:** Está prohibido el uso de `any` o `@ts-ignore`. Define interfaces explícitas en `src/types/` espejando los esquemas Pydantic del backend.
 * **Estilos:** Utilizar clases utilitarias de **TailwindCSS** y los *design tokens* definidos en `docs/DESIGN_GUIDE.md` (`#5B21B6`, `#E11D48`, `#0D9488`, tipografías `Plus Jakarta Sans` e `Inter`).
@@ -105,10 +104,10 @@ Cada carpeta de módulo debe contener exactamente:
 * **Ramas de Trabajo por Módulo:**
   * Setup inicial: `feat/initial-setup`
   * Integrante 1: `feat/api-core-and-complaints` | `feat/web-legal-catalog`
-  * Integrante 2: `feat/api-geo-directory` | `feat/web-map-and-vets`
+  * Integrante 2: `feat/web-map-and-vets` (Centros de Atención en `/mapa`)
   * Integrante 3: `feat/web-static-campaigns-norms-education`
   * Integrante 4: `feat/auth-complaints-panel` | `feat/web-complaint-wizard-4steps`
 * **Convención de Commits (Conventional Commits):**
   * Formato: `<tipo>(<alcance>): <descripción breve en imperativo>`
-  * Ejemplos válidos: `feat(complaints): embed photo annex in generated complaint pdf`, `feat(directory): add geospatial distance filter for attention centers`, `feat(web): build static campaigns, norms, and education pages`.
+  * Ejemplos válidos: `feat(complaints): embed photo annex in generated complaint pdf`, `feat(web): build attention centers map with static catalog`, `feat(web): build static campaigns, norms, and education pages`.
 * **Higiene del Repositorio:** Nunca incluir archivos `.env`, credenciales de MinIO/PostgreSQL, archivos `.pdf` de prueba generados por tests ni carpetas `__pycache__` o `node_modules` en el control de versiones.

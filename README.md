@@ -1,6 +1,6 @@
 # SOS Animal — Plataforma LegalTech de Protección Animal (Sucre, Bolivia)
 
-Monorepo de **SOS Animal**, plataforma ciudadana mantenida por la Universidad para la orientación jurídica, generación de denuncias de maltrato y biocidio en PDF (con Anexo Fotográfico), directorio geoespacial de Zoonosis/veterinarias y difusión estática de salud preventiva, normativa y educación ciudadana en el municipio de Sucre.
+Monorepo de **SOS Animal**, plataforma ciudadana mantenida por la Universidad para la orientación jurídica, generación de denuncias de maltrato y biocidio en PDF (con Anexo Fotográfico), catálogo y mapa interactivo de Centros de Atención (veterinarias e instituciones donde denunciar) y difusión estática de salud preventiva, normativa y educación ciudadana en el municipio de Sucre.
 
 ---
 
@@ -9,7 +9,7 @@ Monorepo de **SOS Animal**, plataforma ciudadana mantenida por la Universidad pa
 Antes de implementar funcionalidades o abrir un Pull Request, revisa:
 
 * [`AGENTS.md`](./AGENTS.md): Reglas obligatorias de arquitectura, seguridad, tipado, ramas y flujo de trabajo.
-* [`docs/PROJECT_BRIEF.md`](./docs/PROJECT_BRIEF.md): Alcance funcional, modelo de datos (5 tablas) y reglas de negocio.
+* [`docs/PROJECT_BRIEF.md`](./docs/PROJECT_BRIEF.md): Alcance funcional, modelo de datos (4 tablas) y reglas de negocio.
 * [`docs/DESIGN_GUIDE.md`](./docs/DESIGN_GUIDE.md): Sistema de diseño, *design tokens*, tipografía y lineamientos UX/UI.
 
 ---
@@ -22,7 +22,7 @@ SOS-Animal/
 │   ├── api/                 # Backend REST en FastAPI (Python 3.12+ / uv)
 │   │   ├── app/
 │   │   │   ├── core/        # Config, DB (SQLModel), JWT/Argon2, RBAC (ciudadano/admin) y Presigned URLs
-│   │   │   ├── modules/     # Dominios en BD: auth, complaints, directory
+│   │   │   ├── modules/     # Dominios en BD: auth, complaints
 │   │   │   └── templates/   # Plantilla HTML/CSS del Documento de Denuncia + Anexo Fotográfico (WeasyPrint)
 │   │   ├── migrations/      # Migraciones de esquema con Alembic
 │   │   └── tests/           # Suite pytest
@@ -136,7 +136,7 @@ Cada módulo de negocio en el backend vive aislado en `apps/api/app/modules/<mod
 | Integrante | Rol | Módulos / Carpetas asignadas | Ramas de trabajo | Responsabilidades principales |
 | :--- | :--- | :--- | :--- | :--- |
 | **Integrante 1 (Tech Lead)** | Backend & LegalTech | `core/`, `templates/`, `modules/auth/`, `modules/complaints/` | `feat/api-core-and-complaints`<br>`feat/web-legal-catalog` | Autenticación JWT + Argon2, roles (`ciudadano`, `admin`), perfilamiento progresivo (`ci_number`, `phone`, `address`), Presigned URLs para 1–3 fotografías, catálogo penal/municipal, emisión inmutable (`BORRADOR` → `ENVIADA`) y PDF **Documento de Denuncia** con **Anexo Fotográfico** en la última hoja. |
-| **Integrante 2** | Fullstack Dev | `modules/directory/`, `/mapa`, `/panel/veterinarias` | `feat/api-geo-directory`<br>`feat/web-map-and-vets` | CRUD de `attention_centers` (CEMZOO y clínicas veterinarias), filtrado por urgencias 24h, cálculo de distancia en kilómetros, isla interactiva Leaflet (`VetMapIsland`) y CRUD administrativo en `/panel/veterinarias` para `admin`. |
+| **Integrante 2** | Fullstack Dev | `/mapa`, `apps/web/src/data/centers.ts` | `feat/web-map-and-vets` | Catálogo tipado estático verificado de Centros de Atención (5 centros de atención veterinaria/CEMZOO y 2 instituciones públicas receptoras de denuncias), cálculo de distancia geolocalizada en kilómetros e isla interactiva Leaflet (`CentersMapIsland`). |
 | **Integrante 3** | Frontend & UI Dev | `/campanas`, `/normativa`, `/educacion`, `public/docs/` | `feat/web-static-campaigns-norms-education` | Páginas estáticas en Astro: calendario de vacunación recomendado, importancia de controles de salud y fechas aproximadas de campañas municipales gratuitas (`/campanas`), resumen de leyes con descarga de PDFs (`/normativa`) y educación ciudadana con descarga de folletos en PDF para *escolares, colegiales y público general* (`/educacion`). |
 | **Integrante 4** | Frontend & UI Dev | `/login`, `/registro`, `/denunciar`, `/mis-denuncias`, `/panel/denuncias`, `/panel/usuarios` | `feat/auth-complaints-panel`<br>`feat/web-complaint-wizard-4steps` | Flujos de registro/login, asistente interactivo de denuncia en **4 pasos** (`ComplaintWizardIsland`) con mini-mapa Leaflet y carga de 1–3 fotos, historial ciudadano (`/mis-denuncias`) y Panel Universitario con sidebar izquierdo (`/panel/denuncias` como registro histórico/estadístico y `/panel/usuarios`). |
 
@@ -147,5 +147,5 @@ Cada módulo de negocio en el backend vive aislado en `apps/api/app/modules/<mod
 1. **Ramas protegidas:** Prohibido hacer *commits* directos a `main` o `develop`.
 2. **Punto de partida:** Crea siempre tu rama desde `develop` actualizada (`git checkout develop && git pull origin develop`).
 3. **Contrato Primero (*Spec-Driven*):** Define y documenta los esquemas Pydantic (`schemas.py`) y rutas (`router.py`) en `apps/api` antes de construir vistas o islas React que consuman la API en `apps/web`.
-4. **Conventional Commits:** Usa mensajes en formato `<tipo>(<alcance>): <descripción breve en imperativo>` (ej. `feat(directory): add geospatial distance filter for attention centers`).
+4. **Conventional Commits:** Usa mensajes en formato `<tipo>(<alcance>): <descripción breve en imperativo>` (ej. `feat(web): build attention centers map with static catalog`).
 5. **Pull Requests:** Todo cambio se integra mediante PR hacia **`develop`** con revisión cruzada del equipo (y aprobación del Tech Lead en archivos bajo `.github/CODEOWNERS`).

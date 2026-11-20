@@ -120,7 +120,6 @@ La plataforma separa claramente la experiencia del **Portal Ciudadano** (`MainLa
   * Identidad `SOS Animal · Panel Institucional` + badge `Sucre, Bolivia`.
   * Menú vertical:
     * **Registro de Denuncias (`/panel/denuncias`)**: Observatorio histórico y estadístico de denuncias generadas (métricas por tipo/modalidad y descarga de PDFs).
-    * **Directorio de Veterinarias (`/panel/veterinarias`)**: CRUD de clínicas veterinarias y Zoonosis con selector de coordenadas en mapa.
     * **Gestión de Usuarios (`/panel/usuarios`)**: Listado de cuentas y asignación del rol `admin`.
   * Acceso `Volver al Portal Ciudadano` (`/`) y botón explícito **`Cerrar sesión`** con texto visible tanto en la barra superior del panel como en el pie del sidebar.
 

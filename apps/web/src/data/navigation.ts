@@ -21,9 +21,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
     isSos: true,
   },
   {
-    label: "Zoonosis y Veterinarias",
-    desktopLabel: "Veterinarias",
-    mobileLabel: "Mapa",
+    label: "Centros de Atención",
+    desktopLabel: "Centros de Atención",
+    mobileLabel: "Centros",
     href: "/mapa",
     icon: "map",
   },
@@ -89,7 +89,7 @@ export const FOOTER_LINK_GROUPS: readonly FooterLinkGroup[] = [
     title: "Servicios Públicos",
     links: [
       { label: "Inicio", href: "/" },
-      { label: "Zoonosis y Veterinarias", href: "/mapa" },
+      { label: "Centros de Atención", href: "/mapa" },
       { label: "Salud y Vacunas", href: "/campanas" },
       { label: "Educación y Prevención", href: "/educacion" },
     ],

@@ -26,7 +26,7 @@
   * **Interactividad (Astro Islands):** Componentes de React 18/19 (`@astrojs/react`) hidratados selectivamente (`client:load` o `client:only="react"`).
   * **Mapas:** Leaflet + `react-leaflet` para ubicación de incidentes, geolocalización de veterinarias y cálculo de distancias en kilómetros.
 * **Base de Datos y Almacenamiento:**
-  * **Relacional:** PostgreSQL 16 (esquema depurado de **5 tablas**).
+  * **Relacional:** PostgreSQL 16 (esquema depurado de **4 tablas**).
   * **Objetos (Archivos de Denuncias):** Almacenamiento compatible con AWS S3 (`pgsty/silo` / MinIO en Docker) para almacenar las fotografías de evidencia (`sos-evidences`, máx. 3 fotos por denuncia) y los PDFs emitidos de denuncias (`sos-documents`).
   * **Documentos Estáticos Públicos:** Los PDFs oficiales de leyes y los folletos educativos se sirven estáticamente desde `apps/web/public/docs/`.
 * **Infraestructura:** Docker y Docker Compose (`web`, `api`, `db`, `storage`, `storage-init`).
@@ -54,8 +54,7 @@ sos-animal-sucre/
 │   │       ├── core/          # Config, JWT, RBAC (ciudadano/admin), conexión DB y cliente S3/MinIO
 │   │       ├── modules/
 │   │       │   ├── auth/      # Login, registro ligero, perfilamiento progresivo y gestión de usuarios
-│   │       │   ├── complaints/# Catálogo legal, borrador/emisión inmutable, anexo fotográfico y PDF
-│   │       │   └── directory/ # CRUD y consultas geoespaciales de Zoonosis y clínicas veterinarias
+│   │       │   └── complaints/# Catálogo legal, borrador/emisión inmutable, anexo fotográfico y PDF
 │   │       └── templates/     # Plantilla HTML/CSS para el Documento de Denuncia en PDF + Anexo Fotográfico
 │   ├── web/                   # Proyecto Web unificado en Astro + React Islands (pnpm)
 │   │   ├── Dockerfile
@@ -73,7 +72,7 @@ sos-animal-sucre/
 
 ---
 
-## 4. Modelo de Datos (Esquema de 5 Tablas en PostgreSQL)
+## 4. Modelo de Datos (Esquema de 4 Tablas en PostgreSQL)
 
 1. **`users` (Usuarios y Perfilamiento Progresivo):**
    * Campos iniciales: `id` (UUID), `full_name`, `email` (Unique), `password_hash`, `role` (`ciudadano`, `admin`), `is_active`, `created_at`.
@@ -88,8 +87,8 @@ sos-animal-sucre/
    * `id` (UUID), `tracking_code` (Unique, formato `SOS-000458-2026`, código de referencia documental generado al emitir el PDF), `user_id` (FK), `offense_category_id` (FK), `incident_date`, `incident_address`, `latitude`, `longitude`, `description` (relato de los hechos), `status` (`BORRADOR`, `ENVIADA`), `is_immutable` (Boolean), `pdf_url` (Key en MinIO), `created_at`, `submitted_at`.
 4. **`complaint_evidences` (Anexo Fotográfico — Máximo 3 Fotos por Denuncia):**
    * `id` (UUID), `complaint_id` (FK), `evidence_type` (`FOTO`), `object_key` (ruta en MinIO), `mime_type` (`image/jpeg`, `image/png`, `image/webp`), `file_size_bytes`, `created_at`.
-5. **`attention_centers` (Directorio de Zoonosis y Centros Veterinarios):**
-   * `id`, `name` (ej. CEMZOO, Veterinaria San Francisco, Veterinaria SucreVet), `category` (`ZOONOSIS`, `VETERINARIA`), `address`, `latitude`, `longitude`, `phone`, `opening_hours`, `is_24_hours` (Boolean), `services` (consultas, emergencias, etc.), `is_active`.
+
+*(Nota de arquitectura: Los Centros de Atención y Zoonosis no requieren persistencia dinámica ni CRUD en base de datos; se mantienen como catálogo tipado estático verificado en `apps/web/src/data/centers.ts` con coordenadas satelitales exactas de Sucre y fotografías oficiales).*
 
 ---
 
@@ -98,7 +97,7 @@ sos-animal-sucre/
 1. **Vistas Públicas Estáticas/Informativas vs. Vistas Protegidas:**
    * **Público (Sin Login — Portal Ciudadano con Navbar Superior):**
      * **Portada (`/`)**: Orientación jurídica, ruta digital de 4 pasos y accesos rápidos.
-     * **Zoonosis y Veterinarias (`/mapa`)**: Mapa interactivo en Leaflet con filtros y cálculo de distancia desde el usuario.
+     * **Centros de Atención (`/mapa`)**: Catálogo tipado y mapa interactivo en Leaflet con dos secciones verificadas por la Universidad (1. CEMZOO y Centros de Atención Veterinaria, 2. Instituciones Públicas donde Denunciar el Maltrato Animal), con cálculo de distancia geolocalizada.
      * **Salud y Campañas (`/campanas` — Estática)**: Calendario de vacunación recomendado para mascotas, importancia de sus controles veterinarios y salud general, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
      * **Normativa (`/normativa` — Estática)**: Resumen ciudadano de las leyes y normas que protegen a los animales con botón para descargarlas directamente en PDF (`public/docs/normativa/`).
      * **Educación (`/educacion` — Estática)**: Guías de tenencia responsable y sección de descarga de folletos informativos en PDF elaborados para distintos públicos (**Escolares**, **Colegiales** y **Público general**, en `public/docs/folletos/`).
@@ -107,7 +106,6 @@ sos-animal-sucre/
      * Historial personal (`/mis-denuncias`) para continuar borradores o volver a descargar el PDF de denuncias emitidas.
    * **Protegido Superadministrador (Exclusivo rol `admin`, `PanelLayout.astro` con Sidebar Izquierdo):**
      * `/panel/denuncias`: Registro histórico y estadístico de las denuncias generadas en la plataforma (conteo por tipo/modalidad, consulta de casos y descarga de PDFs).
-     * `/panel/veterinarias`: CRUD del directorio de clínicas veterinarias y Zoonosis con selector de coordenadas en mapa.
      * `/panel/usuarios`: Listado de usuarios registrados y asignación del rol `admin`.
 2. **Flujo Interactivo e Inmutable de la Denuncia (4 Pasos Ágiles):**
    * **Paso 1 (Tipificación del Hecho):** Selección interactiva de Tipo (`MALTRATO` o `BIOCIDIO`) y Modalidad específica en una misma vista ligera, mostrando automáticamente el fundamento legal aplicable.
@@ -125,7 +123,7 @@ sos-animal-sucre/
 | Integrante | Rol | Módulo Asignado | Rama Backend (`apps/api`) | Rama Frontend (`apps/web`) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Integrante 1 (Tech Lead)** | Backend & LegalTech | Core, Auth (`ciudadano`/`admin`), Motor de Denuncias y PDF con Anexo Fotográfico | `feat/api-core-and-complaints` | `feat/web-legal-catalog` |
-| **Integrante 2** | Fullstack Dev | Geolocalización, Mapa Público (`/mapa`) y CRUD de Veterinarias (`/panel/veterinarias`) | `feat/api-geo-directory` | `feat/web-map-and-vets` |
+| **Integrante 2** | Fullstack Dev | Centros de Atención (`/mapa`) y Geolocalización | *(Sin backend CRUD — catálogo tipado estático verificado)* | `feat/web-map-and-vets` |
 | **Integrante 3** | Frontend & UI Dev | Páginas Estáticas: Salud y Campañas (`/campanas`), Normativa en PDF (`/normativa`) y Educación con Folletos (`/educacion`) | *(Sin backend CRUD — limpieza de `campaigns`/`norms`)* | `feat/web-static-campaigns-norms-education` |
 | **Integrante 4** | Frontend & UI Dev | Auth UI (`/login`, `/registro`), Asistente de 4 Pasos (`/denunciar`), `/mis-denuncias` y Panel Universitario (`/panel/denuncias`, `/panel/usuarios`) | `feat/auth-complaints-panel` | `feat/web-complaint-wizard-4steps` |
 
@@ -135,10 +133,9 @@ sos-animal-sucre/
   * Autenticación JWT, control de roles (`ciudadano`, `admin`), gestión de usuarios para superadministrador (`GET /auth/users`, `PATCH /auth/users/{id}/role`) y perfilamiento progresivo (`ci_number`, `phone`, `address`).
   * Endpoint generador de *Presigned URLs* hacia MinIO restringido a fotografías (`image/jpeg`, `image/png`, `image/webp`, máx. 3 por denuncia).
   * Endpoints del catálogo penal/municipal, creación/edición de denuncias en `BORRADOR`, congelamiento inmutable al emitir (`ENVIADA`), código `SOS-XXXXXX-2026` y renderizado del **Documento de Denuncia en PDF** con `WeasyPrint` incluyendo el **Anexo Fotográfico** en la última hoja.
-* **Integrante 2 (Geolocalización y Directorio Veterinario):**
-  * Endpoints CRUD en FastAPI (`/api/v1/directory`) para `attention_centers` (consulta pública con cálculo de distancia y CRUD protegido para `admin`).
-  * Página pública `/mapa` en Astro con isla de React en Leaflet (`VetMapIsland`), mostrando ubicación de CEMZOO y clínicas veterinarias, distancia en km (`2,1 km`), horarios, filtro de atención 24h y rutas de llegada.
-  * Interfaz CRUD en `/panel/veterinarias` (dentro de `PanelLayout.astro`) con selector de coordenadas en mapa para el superadministrador (`admin`).
+* **Integrante 2 (Centros de Atención y Geolocalización en Sucre):**
+  * Catálogo tipado y verificado en `src/data/centers.ts` con coordenadas exactas, horarios, teléfonos y fotografías oficiales extraídas del informe universitario.
+  * Página pública `/mapa` en Astro con isla interactiva Leaflet (`CentersMapIsland`), dividida en dos secciones: (1) CEMZOO y atención veterinaria con emergencias 24h, y (2) Instituciones públicas receptoras de denuncias (Fiscalía y FELCEDA-POFOMA), con cálculo de distancia geolocalizada y enlaces directos a Google Maps.
 * **Integrante 3 (Páginas Estáticas de Salud, Biblioteca Normativa y Educación por Público):**
   * Página estática `/campanas` en Astro: calendario de vacunación recomendado para perros y gatos, guía sobre la importancia del cuidado y controles veterinarios, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
   * Página estática `/normativa` en Astro: tarjetas con resumen ciudadano de leyes de protección animal (CPE, Ley N.º 700/2015, Código Penal arts. 350 bis y 350 ter, D.S. N.º 4341/2020, Ley Municipal N.º 252/2022) y botón de descarga directa de cada PDF oficial desde `public/docs/normativa/`.
