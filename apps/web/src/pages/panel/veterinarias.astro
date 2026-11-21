@@ -1,0 +1,12 @@
+---
+import AdminVetsIsland from "../../islands/AdminVetsIsland";
+import PanelLayout from "../../layouts/PanelLayout.astro";
+---
+
+<PanelLayout
+  title="Directorio de Zoonosis y Veterinarias"
+  description="Administración de clínicas veterinarias y Zoonosis con georreferenciación en Sucre."
+  requireAdmin={true}
+>
+  <AdminVetsIsland client:only="react" />
+</PanelLayout>

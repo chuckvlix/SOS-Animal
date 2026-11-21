@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Building2,
   ClipboardList,
   LogOut,
   Menu,
@@ -63,6 +64,7 @@ interface SidebarNavContentProps {
   isAdmin: boolean;
   complaintsActive: boolean;
   usersActive: boolean;
+  vetsActive: boolean;
   user: UserRead;
   onNavigate?: () => void;
   onLogout: () => void;
@@ -72,6 +74,7 @@ function SidebarNavContent({
   isAdmin,
   complaintsActive,
   usersActive,
+  vetsActive,
   user,
   onNavigate,
   onLogout,
@@ -129,22 +132,41 @@ function SidebarNavContent({
           </li>
 
           {isAdmin && (
-            <li>
-              <a
-                href="/panel/usuarios"
-                onClick={onNavigate}
-                aria-current={usersActive ? "page" : undefined}
-                className={[
-                  "flex min-h-[44px] items-center gap-2.5 rounded-xl border-l-4 px-3 py-2.5 text-sm font-semibold no-underline transition-colors",
-                  usersActive
-                    ? "border-primary bg-primary-soft text-primary"
-                    : "border-transparent text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
-                ].join(" ")}
-              >
-                <Users aria-hidden="true" className="h-4 w-4 shrink-0" />
-                <span>Gestión de Usuarios</span>
-              </a>
-            </li>
+            <>
+              <li>
+                <a
+                  href="/panel/veterinarias"
+                  onClick={onNavigate}
+                  aria-current={vetsActive ? "page" : undefined}
+                  className={[
+                    "flex min-h-[44px] items-center gap-2.5 rounded-xl border-l-4 px-3 py-2.5 text-sm font-semibold no-underline transition-colors",
+                    vetsActive
+                      ? "border-primary bg-primary-soft text-primary"
+                      : "border-transparent text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
+                  ].join(" ")}
+                >
+                  <Building2 aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  <span>Directorio Veterinarias</span>
+                </a>
+              </li>
+
+              <li>
+                <a
+                  href="/panel/usuarios"
+                  onClick={onNavigate}
+                  aria-current={usersActive ? "page" : undefined}
+                  className={[
+                    "flex min-h-[44px] items-center gap-2.5 rounded-xl border-l-4 px-3 py-2.5 text-sm font-semibold no-underline transition-colors",
+                    usersActive
+                      ? "border-primary bg-primary-soft text-primary"
+                      : "border-transparent text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
+                  ].join(" ")}
+                >
+                  <Users aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  <span>Gestión de Usuarios</span>
+                </a>
+              </li>
+            </>
           )}
         </ul>
 
@@ -324,9 +346,12 @@ export default function PanelHeaderIsland({
   const isAdmin = user.role === "admin";
   const complaintsActive = isActiveRoute(currentPath, "/panel/denuncias");
   const usersActive = isActiveRoute(currentPath, "/panel/usuarios");
+  const vetsActive = isActiveRoute(currentPath, "/panel/veterinarias");
   const activeSectionTitle = usersActive
     ? "Gestión de Usuarios y Roles"
-    : "Registro Histórico y Estadístico";
+    : vetsActive
+      ? "Directorio de Zoonosis y Veterinarias"
+      : "Registro Histórico y Estadístico";
 
   return (
     <>
@@ -338,6 +363,7 @@ export default function PanelHeaderIsland({
           isAdmin={isAdmin}
           complaintsActive={complaintsActive}
           usersActive={usersActive}
+          vetsActive={vetsActive}
           user={user}
           onLogout={handleLogout}
         />
@@ -430,6 +456,7 @@ export default function PanelHeaderIsland({
             isAdmin={isAdmin}
             complaintsActive={complaintsActive}
             usersActive={usersActive}
+            vetsActive={vetsActive}
             user={user}
             onNavigate={closeDrawer}
             onLogout={handleLogout}

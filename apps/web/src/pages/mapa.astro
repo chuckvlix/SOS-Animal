@@ -1,0 +1,11 @@
+---
+import MainLayout from "../layouts/MainLayout.astro";
+import VetMapIsland from "../islands/VetMapIsland";
+---
+
+<MainLayout
+  title="Zoonosis y Veterinarias en Sucre | Directorio y Urgencias 24h"
+  description="Encuentra centros de atención veterinaria en Sucre: Centro Municipal de Zoonosis (CEMZOO) y clínicas privadas con emergencias 24 horas. Calcula tu distancia y ruta de llegada."
+>
+  <VetMapIsland client:only="react" />
+</MainLayout>

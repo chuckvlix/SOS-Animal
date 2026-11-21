@@ -160,4 +160,40 @@ export interface AttentionCenterRead {
   is_24_hours: boolean;
   services: string;
   is_active: boolean;
+  distance_km?: number | null;
+}
+
+export interface AttentionCenterCreateRequest {
+  name: string;
+  category: CenterCategory;
+  address: string;
+  latitude: number;
+  longitude: number;
+  phone?: string | null;
+  opening_hours: string;
+  is_24_hours: boolean;
+  services: string;
+  is_active?: boolean;
+}
+
+export interface AttentionCenterUpdateRequest {
+  name?: string;
+  category?: CenterCategory;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  phone?: string | null;
+  opening_hours?: string;
+  is_24_hours?: boolean;
+  services?: string;
+  is_active?: boolean;
+}
+
+export interface DirectoryFilterParams {
+  category?: CenterCategory;
+  is_24_hours?: boolean;
+  q?: string;
+  is_active?: boolean;
+  user_lat?: number;
+  user_lng?: number;
 }
