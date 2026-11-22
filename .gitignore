@@ -23,6 +23,7 @@ dist/
 # Test artifacts & generated PDFs
 *.pdf
 !docs/*.pdf
+!apps/web/public/docs/campanas/*.pdf
 
 # OS & Editors
 .DS_Store
