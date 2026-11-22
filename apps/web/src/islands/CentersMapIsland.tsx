@@ -15,6 +15,7 @@ import {
   Stethoscope,
   X,
 } from "lucide-react";
+import type { KeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
@@ -130,6 +131,27 @@ function MapController({
   return null;
 }
 
+function MapResizeController() {
+  const map = useMap();
+
+  useEffect(() => {
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => map.invalidateSize({ pan: false }));
+    });
+
+    observer.observe(map.getContainer());
+
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [map]);
+
+  return null;
+}
+
 export default function CentersMapIsland() {
   const [activeTab, setActiveTab] = useState<FilterTab>("ALL");
   const [only24h, setOnly24h] = useState<boolean>(false);
@@ -142,6 +164,38 @@ export default function CentersMapIsland() {
   const [showMobileMap, setShowMobileMap] = useState<boolean>(false);
 
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const tabRefs = useRef<Record<FilterTab, HTMLButtonElement | null>>({
+    ALL: null,
+    CEMZOO_Y_VETERINARIAS: null,
+    INSTITUCIONES_DENUNCIA: null,
+  });
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const tabs: FilterTab[] = [
+      "ALL",
+      "CEMZOO_Y_VETERINARIAS",
+      "INSTITUCIONES_DENUNCIA",
+    ];
+    const currentIndex = tabs.indexOf(activeTab);
+    let nextIndex: number | null = null;
+
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = tabs.length - 1;
+    }
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      const nextTab = tabs[nextIndex];
+      setActiveTab(nextTab);
+      tabRefs.current[nextTab]?.focus();
+    }
+  };
 
   // Geolocation handler
   const handleRequestGeolocation = () => {
@@ -189,9 +243,17 @@ export default function CentersMapIsland() {
       // Search filter
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
+        const matches24Hours =
+          center.is24Hours &&
+          /(?:\b24\s*h\b|\b24\s*horas?\b|\bturnos? de guardia\b)/.test(
+            query,
+          );
         const matchesName = center.name.toLowerCase().includes(query);
         const matchesAddress = center.address.toLowerCase().includes(query);
         const matchesCategory = center.categoryLabel
+          .toLowerCase()
+          .includes(query);
+        const matchesOpeningHours = center.openingHours
           .toLowerCase()
           .includes(query);
         const matchesServices = center.services.some((s) =>
@@ -205,8 +267,10 @@ export default function CentersMapIsland() {
           !matchesName &&
           !matchesAddress &&
           !matchesCategory &&
+          !matchesOpeningHours &&
           !matchesServices &&
-          !matchesSpecial
+          !matchesSpecial &&
+          !matches24Hours
         ) {
           return false;
         }
@@ -286,7 +350,7 @@ export default function CentersMapIsland() {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar por nombre, zona, vacunas, urgencias..."
               aria-label="Buscar centros de atención"
-              className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-2.5 pl-11 pr-10 text-sm text-slate-800 placeholder-slate-400 transition focus:border-brand-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-2.5 pl-11 pr-10 text-sm text-slate-800 placeholder-slate-400 transition focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
             {searchQuery && (
               <button
@@ -313,7 +377,7 @@ export default function CentersMapIsland() {
               }`}
             >
               <Locate
-                className={`h-4 w-4 ${geoLoading ? "animate-spin text-brand-primary" : ""}`}
+                className={`h-4 w-4 ${geoLoading ? "animate-spin text-primary" : ""}`}
                 aria-hidden="true"
               />
               {geoLoading
@@ -343,7 +407,7 @@ export default function CentersMapIsland() {
               onClick={() => setShowMobileMap(!showMobileMap)}
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-xs font-semibold text-slate-700 lg:hidden"
             >
-              <MapPin className="h-3.5 w-3.5 text-brand-primary" aria-hidden="true" />
+              <MapPin className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
               {showMobileMap ? "Ocultar mapa" : "Ver mapa"}
             </button>
           </div>
@@ -360,16 +424,23 @@ export default function CentersMapIsland() {
         <div
           role="tablist"
           aria-label="Secciones de Centros de Atención"
+          onKeyDown={handleTabKeyDown}
           className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4"
         >
           <button
+            ref={(element) => {
+              tabRefs.current.ALL = element;
+            }}
             type="button"
             role="tab"
+            id="centers-tab-all"
+            aria-controls="centers-tabpanel"
             aria-selected={activeTab === "ALL"}
+            tabIndex={activeTab === "ALL" ? 0 : -1}
             onClick={() => setActiveTab("ALL")}
             className={`rounded-xl px-4 py-2 text-xs font-semibold transition sm:text-sm ${
               activeTab === "ALL"
-                ? "bg-brand-primary text-white shadow-sm"
+                ? "bg-primary text-white shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
@@ -377,13 +448,19 @@ export default function CentersMapIsland() {
           </button>
 
           <button
+            ref={(element) => {
+              tabRefs.current.CEMZOO_Y_VETERINARIAS = element;
+            }}
             type="button"
             role="tab"
+            id="centers-tab-veterinary"
+            aria-controls="centers-tabpanel"
             aria-selected={activeTab === "CEMZOO_Y_VETERINARIAS"}
+            tabIndex={activeTab === "CEMZOO_Y_VETERINARIAS" ? 0 : -1}
             onClick={() => setActiveTab("CEMZOO_Y_VETERINARIAS")}
             className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition sm:text-sm ${
               activeTab === "CEMZOO_Y_VETERINARIAS"
-                ? "bg-brand-secondary text-white shadow-sm"
+                ? "bg-secondary-text text-white shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
@@ -392,13 +469,19 @@ export default function CentersMapIsland() {
           </button>
 
           <button
+            ref={(element) => {
+              tabRefs.current.INSTITUCIONES_DENUNCIA = element;
+            }}
             type="button"
             role="tab"
+            id="centers-tab-institutions"
+            aria-controls="centers-tabpanel"
             aria-selected={activeTab === "INSTITUCIONES_DENUNCIA"}
+            tabIndex={activeTab === "INSTITUCIONES_DENUNCIA" ? 0 : -1}
             onClick={() => setActiveTab("INSTITUCIONES_DENUNCIA")}
             className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition sm:text-sm ${
               activeTab === "INSTITUCIONES_DENUNCIA"
-                ? "bg-brand-sos text-white shadow-sm"
+                ? "bg-sos-text text-white shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
@@ -409,9 +492,21 @@ export default function CentersMapIsland() {
       </section>
 
       {/* Main Grid: Cards on the Left, Sticky Map on the Right */}
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+      <div
+        id="centers-tabpanel"
+        role="tabpanel"
+        aria-labelledby={
+          activeTab === "ALL"
+            ? "centers-tab-all"
+            : activeTab === "CEMZOO_Y_VETERINARIAS"
+              ? "centers-tab-veterinary"
+              : "centers-tab-institutions"
+        }
+        tabIndex={0}
+        className="grid min-w-0 grid-cols-1 gap-8 lg:grid-cols-12"
+      >
         {/* Left Column: Cards List */}
-        <div className="space-y-10 lg:col-span-7 xl:col-span-7">
+        <div className="min-w-0 space-y-10 lg:col-span-7 xl:col-span-7">
           {centersWithDistance.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
               <Info className="mx-auto h-10 w-10 text-slate-400" />
@@ -525,14 +620,14 @@ export default function CentersMapIsland() {
 
         {/* Right Column: Interactive Map */}
         <div
-          className={`lg:col-span-5 xl:col-span-5 ${
+          className={`min-w-0 lg:col-span-5 xl:col-span-5 ${
             showMobileMap ? "block" : "hidden lg:block"
           }`}
         >
           <div className="sticky top-24 space-y-3">
             <div className="flex items-center justify-between px-1 text-xs font-medium text-slate-500">
               <span className="inline-flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5 text-brand-primary" />
+                <MapPin className="h-3.5 w-3.5 text-primary" />
                 Mapa georreferenciado de Sucre
               </span>
               <span className="text-[11px] text-slate-400">
@@ -547,6 +642,7 @@ export default function CentersMapIsland() {
                 scrollWheelZoom={true}
                 className="h-full w-full"
               >
+                <MapResizeController />
                 <TileLayer
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -616,7 +712,7 @@ export default function CentersMapIsland() {
                             <button
                               type="button"
                               onClick={() => handleSelectCenter(center, true)}
-                              className="text-[11px] font-bold text-brand-primary underline"
+                              className="text-[11px] font-bold text-primary underline"
                             >
                               Ver detalles
                             </button>
@@ -681,15 +777,15 @@ function CenterCard({
     <article
       ref={refCallback}
       onClick={onSelect}
-      className={`group relative overflow-hidden rounded-2xl border transition-all duration-200 ${
+      className={`group relative min-w-0 overflow-hidden rounded-2xl border transition-all duration-200 ${
         isSelected
-          ? "border-brand-primary bg-white shadow-md ring-2 ring-brand-primary/20"
+          ? "border-primary bg-white shadow-md ring-2 ring-primary/20"
           : "border-slate-200 bg-white shadow-sm hover:border-slate-300 hover:shadow-md"
       }`}
     >
-      <div className="grid grid-cols-1 md:grid-cols-12">
+      <div className="grid min-w-0 grid-cols-1 md:grid-cols-12">
         {/* Card Image */}
-        <div className="relative md:col-span-5 bg-slate-100 min-h-[200px] md:min-h-full">
+        <div className="relative min-w-0 bg-slate-100 md:col-span-5 min-h-[200px] md:min-h-full">
           <img
             src={center.photoUrl}
             alt={center.photoAlt}
@@ -719,7 +815,7 @@ function CenterCard({
         </div>
 
         {/* Card Content */}
-        <div className="flex flex-col justify-between p-5 md:col-span-7 sm:p-6">
+        <div className="flex min-w-0 flex-col justify-between p-5 md:col-span-7 sm:p-6">
           <div className="space-y-3">
             {/* Badges & Distance */}
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -742,7 +838,7 @@ function CenterCard({
             </div>
 
             {/* Name */}
-            <h3 className="text-lg font-black text-slate-900 leading-snug sm:text-xl">
+            <h3 className="min-w-0 text-lg font-black text-slate-900 leading-snug sm:text-xl">
               {center.name}
             </h3>
 
@@ -772,7 +868,7 @@ function CenterCard({
             {/* Telephones */}
             <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
               <span className="inline-flex items-center gap-1 font-bold text-slate-700">
-                <Phone className="h-3.5 w-3.5 text-brand-primary" />
+                <Phone className="h-3.5 w-3.5 text-primary" />
                 Teléfonos:
               </span>
               {center.phones.map((phone) => (
@@ -780,13 +876,13 @@ function CenterCard({
                   key={phone}
                   href={`tel:${phone.replace(/[^0-9]/g, "")}`}
                   onClick={(e) => e.stopPropagation()}
-                  className="rounded-md bg-slate-100 px-2 py-0.5 font-semibold text-brand-primary transition hover:bg-brand-primary hover:text-white"
+                  className="rounded-md bg-slate-100 px-2 py-0.5 font-semibold text-primary transition hover:bg-primary hover:text-white"
                 >
                   {phone}
                 </a>
               ))}
               {center.email && (
-                <span className="text-[11px] text-slate-500 truncate">
+                <span className="min-w-0 truncate text-[11px] text-slate-500">
                   ({center.email})
                 </span>
               )}
@@ -844,7 +940,7 @@ function CenterCard({
               onClick={onSelect}
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 hover:text-slate-900"
             >
-              <MapPin className="h-3.5 w-3.5 text-brand-primary" />
+              <MapPin className="h-3.5 w-3.5 text-primary" />
               {isSelected ? "Centrado en mapa" : "Ver en el mapa"}
             </button>
 
@@ -853,7 +949,7 @@ function CenterCard({
               target="_blank"
               rel="noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-primary px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-primary/90"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-primary-hover"
             >
               Cómo llegar
               <ExternalLink className="h-3.5 w-3.5" />
