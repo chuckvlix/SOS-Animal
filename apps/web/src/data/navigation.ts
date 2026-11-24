@@ -35,18 +35,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: "health",
   },
   {
-    label: "Normativa Legal",
-    desktopLabel: "Normativa",
-    mobileLabel: "Leyes",
-    href: "/normativa",
+    label: "Derechos de los Animales",
+    desktopLabel: "Derechos",
+    mobileLabel: "Derechos",
+    href: "/derechos",
     icon: "legal",
-  },
-  {
-    label: "Educación y Prevención",
-    desktopLabel: "Educación y Prevención",
-    mobileLabel: "Educación",
-    href: "/educacion",
-    icon: "education",
   },
 ];
 
@@ -77,7 +70,7 @@ const MOBILE_NAV_ORDER: readonly string[] = [
   "/mapa",
   "/denunciar",
   "/campanas",
-  "/normativa",
+  "/derechos",
 ];
 
 export const MOBILE_NAV_ITEMS: readonly NavItem[] = MOBILE_NAV_ORDER
@@ -91,7 +84,7 @@ export const FOOTER_LINK_GROUPS: readonly FooterLinkGroup[] = [
       { label: "Inicio", href: "/" },
       { label: "Centros de Atención", href: "/mapa" },
       { label: "Salud y Vacunas", href: "/campanas" },
-      { label: "Educación y Prevención", href: "/educacion" },
+      { label: "Derechos de los Animales", href: "/derechos" },
     ],
   },
   {
@@ -99,7 +92,7 @@ export const FOOTER_LINK_GROUPS: readonly FooterLinkGroup[] = [
     links: [
       { label: "Denunciar Maltrato o Biocidio", href: "/denunciar" },
       { label: "Mis Denuncias Emitidas", href: "/mis-denuncias" },
-      { label: "Normativa Legal Vigente", href: "/normativa" },
+      { label: "Derechos y Normativa Vigente", href: "/derechos" },
     ],
   },
 ];

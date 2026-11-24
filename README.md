@@ -31,7 +31,7 @@ SOS-Animal/
 │       │   └── docs/        # PDFs estáticos descargables: normativa/ y folletos/ (escolares, colegiales, general)
 │       └── src/
 │           ├── layouts/     # MainLayout (Portal Ciudadano) y PanelLayout (Sidebar izquierdo Admin)
-│           ├── pages/       # /, /mapa, /campanas, /normativa, /educacion, /login, /registro, /denunciar, /mis-denuncias, /panel/*
+│           ├── pages/       # /, /mapa, /campanas, /derechos, /login, /registro, /denunciar, /mis-denuncias, /panel/*
 │           ├── islands/     # Islas interactivas de React (Wizard 4 pasos, Mapa Leaflet, Panel Admin)
 │           ├── services/    # Cliente HTTP hacia la API y subida de fotografías a MinIO
 │           └── types/       # Contratos TypeScript alineados con los modelos del backend
@@ -137,7 +137,7 @@ Cada módulo de negocio en el backend vive aislado en `apps/api/app/modules/<mod
 | :--- | :--- | :--- | :--- | :--- |
 | **Integrante 1 (Tech Lead)** | Backend & LegalTech | `core/`, `templates/`, `modules/auth/`, `modules/complaints/` | `feat/api-core-and-complaints`<br>`feat/web-legal-catalog` | Autenticación JWT + Argon2, roles (`ciudadano`, `admin`), perfilamiento progresivo (`ci_number`, `phone`, `address`), Presigned URLs para 1–3 fotografías, catálogo penal/municipal, emisión inmutable (`BORRADOR` → `ENVIADA`) y PDF **Documento de Denuncia** con **Anexo Fotográfico** en la última hoja. |
 | **Integrante 2** | Fullstack Dev | `/mapa`, `apps/web/src/data/centers.ts` | `feat/web-map-and-vets` | Catálogo tipado estático verificado de Centros de Atención (5 centros de atención veterinaria/CEMZOO y 2 instituciones públicas receptoras de denuncias), cálculo de distancia geolocalizada en kilómetros e isla interactiva Leaflet (`CentersMapIsland`). |
-| **Integrante 3** | Frontend & UI Dev | `/campanas`, `/normativa`, `/educacion`, `public/docs/` | `feat/web-static-campaigns-norms-education` | Páginas estáticas en Astro: calendario de vacunación recomendado, importancia de controles de salud y fechas aproximadas de campañas municipales gratuitas (`/campanas`), resumen de leyes con descarga de PDFs (`/normativa`) y educación ciudadana con descarga de folletos en PDF para *escolares, colegiales y público general* (`/educacion`). |
+| **Integrante 3** | Frontend & UI Dev | `/campanas`, `/derechos`, `public/docs/` | `feat/web-static-campaigns-norms-education` | Páginas estáticas en Astro: calendario de vacunación recomendado, importancia de controles de salud y fechas aproximadas de campañas municipales gratuitas (`/campanas`) y derechos de los animales con normativa, tenencia responsable y descargas educativas (`/derechos`). |
 | **Integrante 4** | Frontend & UI Dev | `/login`, `/registro`, `/denunciar`, `/mis-denuncias`, `/panel/denuncias`, `/panel/usuarios` | `feat/auth-complaints-panel`<br>`feat/web-complaint-wizard-4steps` | Flujos de registro/login, asistente interactivo de denuncia en **4 pasos** (`ComplaintWizardIsland`) con mini-mapa Leaflet y carga de 1–3 fotos, historial ciudadano (`/mis-denuncias`) y Panel Universitario con sidebar izquierdo (`/panel/denuncias` como registro histórico/estadístico y `/panel/usuarios`). |
 
 ---

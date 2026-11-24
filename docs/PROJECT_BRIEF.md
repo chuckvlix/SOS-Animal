@@ -60,10 +60,10 @@ sos-animal-sucre/
 │   │   ├── Dockerfile
 │   │   ├── package.json
 │   │   ├── public/
-│   │   │   └── docs/          # PDFs estáticos: leyes (normativa/) y folletos por público (folletos/)
+│   │   │   └── docs/          # PDFs estáticos: derechos, leyes oficiales y fichas educativas
 │   │   └── src/
 │   │       ├── layouts/       # MainLayout (Portal Ciudadano) y PanelLayout (Sidebar izquierdo Admin)
-│   │       ├── pages/         # /, /mapa, /campanas, /normativa, /educacion, /login, /registro, /denunciar, /mis-denuncias, /panel/*
+│   │       ├── pages/         # /, /mapa, /campanas, /derechos, /login, /registro, /denunciar, /mis-denuncias, /panel/*
 │   │       ├── islands/       # Componentes React: VetMap, ComplaintWizard (4 pasos), AdminPanel, AuthForms
 │   │       └── services/      # Cliente API, interceptores JWT y subida de fotografías a URLs pre-firmadas
 │   └── mobile/                # (Fase 2) Aplicación React Native + Expo
@@ -99,8 +99,7 @@ sos-animal-sucre/
      * **Portada (`/`)**: Orientación jurídica, ruta digital de 4 pasos y accesos rápidos.
      * **Centros de Atención (`/mapa`)**: Catálogo tipado y mapa interactivo en Leaflet con dos secciones verificadas por la Universidad (1. CEMZOO y Centros de Atención Veterinaria, 2. Instituciones Públicas donde Denunciar el Maltrato Animal), con cálculo de distancia geolocalizada.
      * **Salud y Campañas (`/campanas` — Estática)**: Calendario de vacunación recomendado para mascotas, importancia de sus controles veterinarios y salud general, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
-     * **Normativa (`/normativa` — Estática)**: Resumen ciudadano de las leyes y normas que protegen a los animales con botón para descargarlas directamente en PDF (`public/docs/normativa/`).
-     * **Educación (`/educacion` — Estática)**: Guías de tenencia responsable y sección de descarga de folletos informativos en PDF elaborados para distintos públicos (**Escolares**, **Colegiales** y **Público general**, en `public/docs/folletos/`).
+     * **Derechos de los Animales (`/derechos` — Estática)**: Resumen ciudadano de los derechos reconocidos, el marco penal y municipal, las obligaciones de tenencia responsable y las fichas jurídicas oficiales disponibles para descarga.
    * **Protegido Ciudadano (Requiere JWT, `MainLayout.astro`):**
      * Asistente interactivo de denuncia en **4 pasos** (`/denunciar`) con Guard inmediato hacia `/login?next=/denunciar`.
      * Historial personal (`/mis-denuncias`) para continuar borradores o volver a descargar el PDF de denuncias emitidas.
@@ -124,7 +123,7 @@ sos-animal-sucre/
 | :--- | :--- | :--- | :--- | :--- |
 | **Integrante 1 (Tech Lead)** | Backend & LegalTech | Core, Auth (`ciudadano`/`admin`), Motor de Denuncias y PDF con Anexo Fotográfico | `feat/api-core-and-complaints` | `feat/web-legal-catalog` |
 | **Integrante 2** | Fullstack Dev | Centros de Atención (`/mapa`) y Geolocalización | *(Sin backend CRUD — catálogo tipado estático verificado)* | `feat/web-map-and-vets` |
-| **Integrante 3** | Frontend & UI Dev | Páginas Estáticas: Salud y Campañas (`/campanas`), Normativa en PDF (`/normativa`) y Educación con Folletos (`/educacion`) | *(Sin backend CRUD — limpieza de `campaigns`/`norms`)* | `feat/web-static-campaigns-norms-education` |
+| **Integrante 3** | Frontend & UI Dev | Páginas Estáticas: Salud y Campañas (`/campanas`) y Derechos de los Animales (`/derechos`) | *(Sin backend CRUD — limpieza de `campaigns`/`norms`)* | `feat/web-static-campaigns-norms-education` |
 | **Integrante 4** | Frontend & UI Dev | Auth UI (`/login`, `/registro`), Asistente de 4 Pasos (`/denunciar`), `/mis-denuncias` y Panel Universitario (`/panel/denuncias`, `/panel/usuarios`) | `feat/auth-complaints-panel` | `feat/web-complaint-wizard-4steps` |
 
 ### Alcance Detallado por Integrante
@@ -138,8 +137,7 @@ sos-animal-sucre/
   * Página pública `/mapa` en Astro con isla interactiva Leaflet (`CentersMapIsland`), dividida en dos secciones: (1) CEMZOO y atención veterinaria con emergencias 24h, y (2) Instituciones públicas receptoras de denuncias (Fiscalía y FELCEDA-POFOMA), con cálculo de distancia geolocalizada y enlaces directos a Google Maps.
 * **Integrante 3 (Páginas Estáticas de Salud, Biblioteca Normativa y Educación por Público):**
   * Página estática `/campanas` en Astro: calendario de vacunación recomendado para perros y gatos, guía sobre la importancia del cuidado y controles veterinarios, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
-  * Página estática `/normativa` en Astro: tarjetas con resumen ciudadano de leyes de protección animal (CPE, Ley N.º 700/2015, Código Penal arts. 350 bis y 350 ter, D.S. N.º 4341/2020, Ley Municipal N.º 252/2022) y botón de descarga directa de cada PDF oficial desde `public/docs/normativa/`.
-  * Página estática `/educacion` en Astro: guías de tenencia responsable y prevención del maltrato + sección de descarga de **folletos informativos en PDF** segmentados para **Escolares**, **Colegiales** y **Público general** desde `public/docs/folletos/`.
+  * Página estática `/derechos` en Astro: derechos reconocidos por ley, marco penal, obligaciones de tenencia responsable y descarga de fichas educativas y normativa oficial disponible desde `public/docs/derechos/`.
 * **Integrante 4 (Asistente Interactivo de 4 Pasos, Auth UI y Panel Universitario):**
   * Pantallas de Login (`/login`), Registro ligero (`/registro`), `MainLayout.astro` (con botón explícito `Cerrar sesión`) y `PanelLayout.astro` (con **sidebar izquierdo** exclusivo para `/panel/*`).
   * Isla de React para el **Asistente de Denuncia en 4 pasos (`/denunciar`)**, optimizado para móvil (interactivo y sin saturación visual): tipificación unificada, mini-mapa Leaflet en Sucre, carga de 1 a 3 fotos para el Anexo Fotográfico, previsualización y descarga del PDF.
