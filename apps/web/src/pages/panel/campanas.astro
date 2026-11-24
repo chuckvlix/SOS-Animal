@@ -1,0 +1,12 @@
+---
+import AdminCampaignsIsland from "../../islands/AdminCampaignsIsland";
+import PanelLayout from "../../layouts/PanelLayout.astro";
+---
+
+<PanelLayout
+  title="Campañas y Jornadas"
+  description="Publicación y administración de campañas de vacunación, esterilización y atención veterinaria de SOS Animal."
+  requireAdmin={true}
+>
+  <AdminCampaignsIsland client:only="react" />
+</PanelLayout>

@@ -6,6 +6,7 @@ from sqlmodel import SQLModel
 
 from app.core.config import settings
 from app.modules.auth.models import User  # noqa: F401
+from app.modules.campaigns.models import Campaign  # noqa: F401
 from app.modules.complaints.models import (  # noqa: F401
     Complaint,
     ComplaintEvidence,

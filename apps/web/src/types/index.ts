@@ -150,3 +150,50 @@ export type {
   AttentionCenterItem,
   CenterSectionType,
 } from "./centers";
+
+export type CampaignType =
+  | "CALENDARIO_VACUNACION"
+  | "CAMPANA_ESTERILIZACION"
+  | "ATENCION_EMERGENCIA"
+  | "PROXIMA_JORNADA";
+
+export interface CampaignRead {
+  id: number;
+  title: string;
+  campaign_type: CampaignType;
+  description: string;
+  requirements: string | null;
+  location_address: string;
+  latitude: number | null;
+  longitude: number | null;
+  start_date: string;
+  end_date: string;
+  institution: string;
+  created_by: string;
+}
+
+export interface CampaignCreate {
+  title: string;
+  campaign_type: CampaignType;
+  description: string;
+  requirements?: string | null;
+  location_address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  start_date: string;
+  end_date: string;
+  institution: string;
+}
+
+export interface CampaignUpdate {
+  title?: string;
+  campaign_type?: CampaignType;
+  description?: string;
+  requirements?: string | null;
+  location_address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  start_date?: string;
+  end_date?: string;
+  institution?: string;
+}

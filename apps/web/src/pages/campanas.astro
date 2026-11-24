@@ -1,4 +1,5 @@
 ---
+import CampaignsCalendarIsland from "../islands/CampaignsCalendarIsland";
 import MainLayout from "../layouts/MainLayout.astro";
 
 const vaccinationGuides = [
@@ -46,6 +47,22 @@ const vaccinationGuides = [
         Vacunar y esterilizar a tu mascota previene enfermedades, evita camadas no deseadas y ayuda a reducir el abandono.
       </p>
     </header>
+
+    <section aria-labelledby="upcoming-campaigns" class="space-y-4">
+      <div>
+        <p class="m-0 text-xs font-semibold uppercase tracking-wide text-secondary-text">
+          Agenda institucional
+        </p>
+        <h2 id="upcoming-campaigns" class="mt-1 font-display text-xl font-bold text-text-primary sm:text-2xl">
+          Próximas jornadas y campañas
+        </h2>
+        <p class="mt-2 max-w-3xl text-sm leading-relaxed text-text-secondary">
+          Consulta las jornadas gratuitas de vacunación antirrábica, esterilización y atención veterinaria programadas en la ciudad.
+        </p>
+      </div>
+
+      <CampaignsCalendarIsland client:only="react" />
+    </section>
 
     <section aria-labelledby="vaccination-importance" class="space-y-4">
       <div>
