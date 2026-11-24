@@ -11,7 +11,7 @@ Este archivo define las reglas obligatorias de arquitectura, seguridad, tipado y
 
 1. **Contrato Primero (Spec-Driven Development):**
    * Nunca implementes una vista o isla de React que consuma la API sin que exista previamente su contrato de datos (`schemas.py` y ruta documentada en `router.py`) en `apps/api`.
-   * Las vistas informativas estáticas (`/campanas`, `/normativa`, `/educacion`) se alimentan de datos tipados locales en `apps/web/src/data/` y archivos PDF estáticos en `apps/web/public/docs/`.
+   * Las vistas informativas estáticas (`/campanas`, `/derechos`) se alimentan de datos tipados locales en `apps/web/src/data/` y archivos PDF estáticos en `apps/web/public/docs/`.
    * Antes de codificar un nuevo endpoint, presenta brevemente los esquemas Pydantic de entrada (`Request`) y salida (`Response`) junto con los códigos de estado HTTP esperados.
 2. **Aclaración Socrática ante Ambigüedades:**
    * Si una instrucción del desarrollador presenta ambigüedades de negocio, validación jurídica o flujo de interfaz, formula **1 o 2 preguntas concretas** antes de generar bloques extensos de código.
@@ -85,8 +85,7 @@ Cada carpeta de módulo debe contener exactamente:
   * `/`: Portada informativa con acceso directo SOS, ruta digital de 4 pasos, servicios ciudadanos y marco jurídico.
   * `/mapa`: Página **Centros de Atención** alimentada desde datos tipados verificados (`src/data/centers.ts`), dividida en 2 secciones (*CEMZOO y Centros de Atención Veterinaria* e *Instituciones Públicas donde Denunciar*) con mapa interactivo Leaflet (`CentersMapIsland`).
   * `/campanas`: Página **estática** con calendario de vacunación recomendado para mascotas, importancia de controles de salud y fechas aproximadas de campañas gratuitas municipales de vacunación antirrábica y esterilización.
-  * `/normativa`: Página **estática** con resumen ciudadano de leyes y normas vigentes y botones de descarga directa de PDFs desde `public/docs/normativa/`.
-  * `/educacion`: Página **estática** de tenencia responsable y prevención con descarga de folletos informativos en PDF segmentados por público (*escolares*, *colegiales*, *público general*) desde `public/docs/folletos/`.
+  * `/derechos`: Página **estática** que unifica los derechos reconocidos, el marco jurídico, las obligaciones de tenencia responsable y la descarga de fichas educativas y normativa oficial desde `public/docs/derechos/`.
 * **Layouts Diferenciados por Rol:**
   * **Portal Ciudadano (`MainLayout.astro`):** Barra de navegación superior en escritorio y barra inferior en móvil (sin sidebar lateral). Incluye botón explícito **`Cerrar sesión`** cuando hay sesión activa.
   * **Panel Universitario (`PanelLayout.astro`):** Acceso exclusivo para el rol `admin` (los usuarios `ciudadano` tienen prohibido el acceso y son redirigidos a `/`). Implementa un **sidebar fijo a la izquierda** en escritorio y un *drawer* lateral en `<dialog>` para móvil, con vistas `/panel/denuncias` (registro histórico y estadístico) y `/panel/usuarios` (gestión de usuarios).

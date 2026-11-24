@@ -39,14 +39,7 @@ const sosActive = isActiveRoute(currentPath, SOS_NAV_ITEM.href);
                   ]}
                 >
                   <Icon name={item.icon} class="hidden h-4 w-4 2xl:block" />
-                  {item.href === "/educacion" ? (
-                    <>
-                      <span class="2xl:hidden">Educación</span>
-                      <span class="hidden 2xl:inline">{desktopText}</span>
-                    </>
-                  ) : (
-                    <span>{desktopText}</span>
-                  )}
+                  <span>{desktopText}</span>
                 </a>
               </li>
             );

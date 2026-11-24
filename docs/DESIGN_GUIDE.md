@@ -96,8 +96,7 @@ La plataforma separa claramente la experiencia del **Portal Ciudadano** (`MainLa
 1. **Inicio** (`Home` -> `/`): Portada informativa con acceso directo SOS, ruta digital de 4 pasos, servicios ciudadanos y marco jurídico.
 2. **Zoonosis y Veterinarias** (`MapPin` -> `/mapa`): Mapa interactivo con filtros (CEMZOO, clínicas 24h, urgencias) y cálculo de distancia.
 3. **Salud y Vacunas** (`Heart` -> `/campanas`): Página estática con calendario de vacunación recomendado para mascotas, importancia de controles de salud y fechas aproximadas de campañas municipales gratuitas de vacunación antirrábica y esterilización.
-4. **Normativa Legal** (`Scale` -> `/normativa`): Página estática con resumen ciudadano de leyes nacionales y municipales vigentes y descarga directa de PDFs oficiales (`public/docs/normativa/`).
-5. **Educación y Prevención** (`BookOpen` -> `/educacion`): Página estática con guías de tenencia responsable y sección de descarga de folletos informativos en PDF por público (**Escolares**, **Colegiales** y **Público general**, en `public/docs/folletos/`).
+4. **Derechos de los Animales** (`Scale` -> `/derechos`): Página estática que unifica derechos reconocidos, tenencia responsable, sanciones y descarga de normativa y fichas educativas.
 6. **Denunciar SOS** (`ShieldAlert` -> `/denunciar`): Asistente interactivo en **4 pasos** para generar el **Documento de Denuncia** en PDF con Anexo Fotográfico. Destacado con acento `--color-sos` (`#E11D48`).
 7. **Mis Denuncias** (`FileText` -> `/mis-denuncias`): Visible cuando el ciudadano cuenta con sesión autenticada activa; permite retomar borradores y descargar los PDFs generados.
 
@@ -166,7 +165,7 @@ Para alimentar la lógica dinámica del formulario y la generación automática 
 * **Categoría B: Biocidio (`Código Penal Art. 350 ter - Biocidio`)**
   * Subtipos: `Biocidio por ensañamiento`, `Biocidio por motivos fútiles`, `Biocidio múltiple (varios animales)`, `Biocidio como consecuencia de maltrato`, `Biocidio por crueldad`.
 
-### 6.2 Base Normativa Inyectada en el PDF y Disponible en `/normativa`
+### 6.2 Base Normativa Inyectada en el PDF y Disponible en `/derechos`
 * **Constitución Política del Estado (CPE):** Arts. 33 y 405.
 * **Ley N.º 700/2015:** *Para la Defensa de los Animales Contra Actos de Crueldad y Maltrato*.
 * **Código Penal Boliviano:** Art. 350 bis (Tratos crueles) y Art. 350 ter (Biocidio).

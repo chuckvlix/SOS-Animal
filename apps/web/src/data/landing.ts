@@ -42,7 +42,7 @@ export const ABOUT_MISSION_CONTENT: AboutMissionContent = {
   ],
   cta: {
     label: "Conocer marco legal",
-    href: "/normativa",
+    href: "/derechos",
   },
   image: {
     src: "/images/about-mission-960.webp",
@@ -125,12 +125,12 @@ export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
     },
   },
   {
-    category: "Educación y Prevención",
-    title: "Guías de tenencia y cuidado responsable",
+    category: "Derechos de los Animales",
+    title: "Derechos, responsabilidades y normativa vigente",
     description:
-      "Aprende a reconocer señales de maltrato, cómo actuar ante abandono en vía pública y cuidados básicos esenciales.",
-    href: "/educacion",
-    ctaLabel: "Ir a educación y prevención",
+      "Conoce los derechos reconocidos por ley, las obligaciones de tenencia responsable y los documentos oficiales disponibles.",
+    href: "/derechos",
+    ctaLabel: "Conocer derechos y normativa",
     accent: "primary",
     image: {
       src: "/images/community-education.webp",
