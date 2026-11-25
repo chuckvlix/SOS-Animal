@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ClipboardList,
   LogOut,
+  Megaphone,
   Menu,
   RefreshCw,
   ShieldCheck,
@@ -62,6 +63,7 @@ function BrandMarkSvg({ className }: { className?: string }) {
 interface SidebarNavContentProps {
   isAdmin: boolean;
   complaintsActive: boolean;
+  campaignsActive: boolean;
   usersActive: boolean;
   user: UserRead;
   onNavigate?: () => void;
@@ -71,6 +73,7 @@ interface SidebarNavContentProps {
 function SidebarNavContent({
   isAdmin,
   complaintsActive,
+  campaignsActive,
   usersActive,
   user,
   onNavigate,
@@ -127,6 +130,25 @@ function SidebarNavContent({
               <span>Registro de Denuncias</span>
             </a>
           </li>
+
+          {isAdmin && (
+            <li>
+              <a
+                href="/panel/campanas"
+                onClick={onNavigate}
+                aria-current={campaignsActive ? "page" : undefined}
+                className={[
+                  "flex min-h-[44px] items-center gap-2.5 rounded-xl border-l-4 px-3 py-2.5 text-sm font-semibold no-underline transition-colors",
+                  campaignsActive
+                    ? "border-primary bg-primary-soft text-primary"
+                    : "border-transparent text-text-secondary hover:bg-bg-canvas hover:text-text-primary",
+                ].join(" ")}
+              >
+                <Megaphone aria-hidden="true" className="h-4 w-4 shrink-0" />
+                <span>Campañas y Jornadas</span>
+              </a>
+            </li>
+          )}
 
           {isAdmin && (
             <li>
@@ -323,10 +345,13 @@ export default function PanelHeaderIsland({
 
   const isAdmin = user.role === "admin";
   const complaintsActive = isActiveRoute(currentPath, "/panel/denuncias");
+  const campaignsActive = isActiveRoute(currentPath, "/panel/campanas");
   const usersActive = isActiveRoute(currentPath, "/panel/usuarios");
-  const activeSectionTitle = usersActive
-    ? "Gestión de Usuarios y Roles"
-    : "Registro Histórico y Estadístico";
+  const activeSectionTitle = campaignsActive
+    ? "Campañas y Jornadas"
+    : usersActive
+      ? "Gestión de Usuarios y Roles"
+      : "Registro Histórico y Estadístico";
 
   return (
     <>
@@ -337,6 +362,7 @@ export default function PanelHeaderIsland({
         <SidebarNavContent
           isAdmin={isAdmin}
           complaintsActive={complaintsActive}
+          campaignsActive={campaignsActive}
           usersActive={usersActive}
           user={user}
           onLogout={handleLogout}
@@ -429,6 +455,7 @@ export default function PanelHeaderIsland({
           <SidebarNavContent
             isAdmin={isAdmin}
             complaintsActive={complaintsActive}
+            campaignsActive={campaignsActive}
             usersActive={usersActive}
             user={user}
             onNavigate={closeDrawer}

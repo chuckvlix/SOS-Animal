@@ -60,12 +60,32 @@ function MapClickAndCenterController({
   });
 
   useEffect(() => {
-    if (latitude !== null && longitude !== null) {
+    if (
+      latitude !== null &&
+      longitude !== null &&
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude)
+    ) {
       map.flyTo([latitude, longitude], Math.max(map.getZoom(), 15), {
         duration: 0.4,
       });
     }
   }, [latitude, longitude, map]);
+
+  return null;
+}
+
+function MapResizeController() {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [map]);
 
   return null;
 }
@@ -192,6 +212,7 @@ export default function IncidentLocationPicker({
             disabled={disabled}
             onSelect={handleSelectCoords}
           />
+          <MapResizeController />
           {hasCoords && (
             <Marker
               position={[latitude, longitude]}
