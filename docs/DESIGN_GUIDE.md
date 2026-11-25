@@ -9,9 +9,10 @@
 * **Nombre oficial de la aplicación:** `SOS Animal`
 * **Subtítulo / Descriptor contextual:** *Plataforma de orientación jurídica y protección animal*
 * **Selector de jurisdicción:** Badge o selector desacoplado del logotipo (`Sucre, Bolivia`) para permitir futura escalabilidad a otros municipios o departamentos sin modificar la marca.
-* **Reglas del Logotipo:**
+* **Reglas del Logotipo e Identidad Institucional:**
   * **Isotipo:** Exclusivamente el símbolo combinado de **corazón + huella animal** en color primario (`#5B21B6`).
   * **Logotipo (Lockup):** El isotipo puede acompañarse del texto `SOS Animal` en tipografía *Plus Jakarta Sans Bold*, pero el isotipo debe funcionar de forma autónoma (favicons, ícono de app móvil, avatares y marca de agua en PDF).
+  * **Presencia de la UPDS:** Incluir el logotipo institucional de la **UPDS** en un lugar visible del header o del footer, manteniendo armonía visual y contraste con la identidad de `SOS Animal` (ubicación y tamaño flexibles a criterio de diseño).
 
 ---
 
@@ -93,19 +94,20 @@ Se combinan dos familias tipográficas gratuitas de Google Fonts para equilibrar
 La plataforma separa claramente la experiencia del **Portal Ciudadano** (`MainLayout.astro`, sin sidebar lateral) del **Panel Universitario de Administración** (`PanelLayout.astro`, con sidebar fijo a la izquierda exclusivo para el superadministrador `admin`).
 
 ### 4.1 Destinos de Navegación Global (Portal Ciudadano)
-1. **Inicio** (`Home` -> `/`): Portada informativa con acceso directo SOS, ruta digital de 4 pasos, servicios ciudadanos y marco jurídico.
-2. **Zoonosis y Veterinarias** (`MapPin` -> `/mapa`): Mapa interactivo con filtros (CEMZOO, clínicas 24h, urgencias) y cálculo de distancia.
-3. **Salud y Vacunas** (`Heart` -> `/campanas`): Página estática con calendario de vacunación recomendado para mascotas, importancia de controles de salud y fechas aproximadas de campañas municipales gratuitas de vacunación antirrábica y esterilización.
-4. **Derechos de los Animales** (`Scale` -> `/derechos`): Página estática que unifica derechos reconocidos, tenencia responsable, sanciones y descarga de normativa y fichas educativas.
-6. **Denunciar SOS** (`ShieldAlert` -> `/denunciar`): Asistente interactivo en **4 pasos** para generar el **Documento de Denuncia** en PDF con Anexo Fotográfico. Destacado con acento `--color-sos` (`#E11D48`).
-7. **Mis Denuncias** (`FileText` -> `/mis-denuncias`): Visible cuando el ciudadano cuenta con sesión autenticada activa; permite retomar borradores y descargar los PDFs generados.
+1. **Inicio** (`Home` -> `/`): Portada informativa con acceso directo SOS, ruta digital de 4 pasos, servicios ciudadanos, marco jurídico y espacio abierto para sección de campañas UPDS (carrusel, galería u otro formato) y bloque opcional "Sobre nosotros".
+2. **Centros de Atención** (`MapPin` -> `/centros-de-atencion`): Mapa interactivo con filtros (CEMZOO, clínicas 24h, urgencias) y cálculo de distancia.
+3. **Salud y Vacunas** (`Heart` -> `/salud-y-vacunas`): Página estática con calendario de vacunación recomendado para mascotas, importancia de controles de salud y fechas aproximadas de campañas municipales gratuitas de vacunación antirrábica y esterilización.
+4. **Normativa** (`Scale` -> `/normativa`): Página estática que unifica normativa vigente, derechos reconocidos, tenencia responsable, sanciones y descarga de leyes y fichas educativas.
+5. **Denunciar SOS** (`ShieldAlert` -> `/denunciar`): Asistente interactivo en **4 pasos** para generar el **Documento de Denuncia** en PDF con Anexo Fotográfico. Destacado con acento `--color-sos` (`#E11D48`).
+6. **Mis Denuncias** (`FileText` -> `/mis-denuncias`): Visible cuando el ciudadano cuenta con sesión autenticada activa; permite retomar borradores y descargar los PDFs generados.
+*(Nota de flexibilidad: El espacio institucional "Sobre nosotros" —explicando que la plataforma es iniciativa de la UPDS junto con nombres o contactos de los desarrolladores— puede implementarse como una pestaña/página independiente o como una sección al final de la landing principal `/`, según el criterio del responsable del módulo).*
 
 ### 4.2 Adaptación por Dispositivo y Rol
 
 #### Portal Ciudadano (`MainLayout.astro`)
 * **Vista Web / Escritorio (`>= 1024px`):**
-  * **Barra Superior Fija (`sticky top-0`):** Contiene el logotipo `SOS Animal`, los enlaces informativos principales (`Inicio`, `Veterinarias`, `Salud y Vacunas`, `Normativa`, `Educación`), el acceso condicional `Mis Denuncias` (con sesión activa), el botón explícito **`Cerrar sesión`** (con texto visible) y el botón destacado `Denunciar SOS`.
-  * **Pie de Página Web (`WebFooter`):** Visible en escritorio (`>= 1024px`) con identidad de marca, insignia de jurisdicción (`Sucre, Bolivia`), enlaces de servicio público e instituciones receptoras.
+  * **Barra Superior Fija (`sticky top-0`):** Contiene el logotipo `SOS Animal` (y opcionalmente el logo UPDS si se ubica en header), los enlaces informativos principales acompañados de sus **mismos íconos que en móvil** (`Inicio`, `Centros de Atención`, `Salud y Vacunas`, `Normativa`), el acceso condicional `Mis Denuncias` (con sesión activa), el botón explícito **`Cerrar sesión`** (con texto visible) y el botón destacado `Denunciar SOS`.
+  * **Pie de Página Web (`WebFooter`):** Visible en escritorio (`>= 1024px`) con identidad de marca, respaldo/logo UPDS si se ubica aquí, insignia de jurisdicción (`Sucre, Bolivia`), enlaces de servicio público e instituciones receptoras.
   * **En el Flujo de Denuncia (`/denunciar`, Layout de 2 Columnas `60% / 40%` en escritorio):**
     * *Columna Izquierda:* Formulario interactivo paso a paso (4 pasos) dentro de una tarjeta blanca (`#FFFFFF`).
     * *Columna Derecha (Sticky):* Panel superior con **Sustento Legal Detectado** (fondo `#F3E8FF`) y panel inferior con **Vista Previa en Vivo del Documento de Denuncia** (incluyendo miniaturas/conteo del Anexo Fotográfico).
@@ -120,6 +122,7 @@ La plataforma separa claramente la experiencia del **Portal Ciudadano** (`MainLa
   * Menú vertical:
     * **Registro de Denuncias (`/panel/denuncias`)**: Observatorio histórico y estadístico de denuncias generadas (métricas por tipo/modalidad y descarga de PDFs).
     * **Gestión de Usuarios (`/panel/usuarios`)**: Listado de cuentas y asignación del rol `admin`.
+    * **Campañas UPDS (Módulo futuro):** CRUD para que los administradores publiquen y gestionen las campañas institucionales mostradas en la landing.
   * Acceso `Volver al Portal Ciudadano` (`/`) y botón explícito **`Cerrar sesión`** con texto visible tanto en la barra superior del panel como en el pie del sidebar.
 
 ---
@@ -152,6 +155,9 @@ La plataforma separa claramente la experiencia del **Portal Ciudadano** (`MainLa
 5. **Accesibilidad (WCAG AA):**
    * Ratio de contraste mínimo de `4.5:1` en todo texto funcional.
    * Nunca transmitir información solo mediante color: acompañar pines de mapa o estados activos con etiquetas textuales explícitas y bordes diferenciados.
+6. **Evolución UX/UI y Libertad Creativa:**
+   * Se promueven mejoras estéticas y de contenido en todas las páginas para reforzar la coherencia visual del proyecto.
+   * En el flujo de denuncias (`/denunciar`), se proyecta incorporar tarjetas informativas por cada subcategoría de delito y revisar el formato del documento de denuncia conforme al análisis normativo vigente.
 
 ---
 
@@ -165,7 +171,7 @@ Para alimentar la lógica dinámica del formulario y la generación automática 
 * **Categoría B: Biocidio (`Código Penal Art. 350 ter - Biocidio`)**
   * Subtipos: `Biocidio por ensañamiento`, `Biocidio por motivos fútiles`, `Biocidio múltiple (varios animales)`, `Biocidio como consecuencia de maltrato`, `Biocidio por crueldad`.
 
-### 6.2 Base Normativa Inyectada en el PDF y Disponible en `/derechos`
+### 6.2 Base Normativa Inyectada en el PDF y Disponible en `/normativa`
 * **Constitución Política del Estado (CPE):** Arts. 33 y 405.
 * **Ley N.º 700/2015:** *Para la Defensa de los Animales Contra Actos de Crueldad y Maltrato*.
 * **Código Penal Boliviano:** Art. 350 bis (Tratos crueles) y Art. 350 ter (Biocidio).

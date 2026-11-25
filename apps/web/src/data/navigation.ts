@@ -24,21 +24,21 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: "Centros de Atención",
     desktopLabel: "Centros de Atención",
     mobileLabel: "Centros",
-    href: "/mapa",
+    href: "/centros-de-atencion",
     icon: "map",
   },
   {
     label: "Salud y Vacunas",
     desktopLabel: "Salud y Vacunas",
     mobileLabel: "Salud",
-    href: "/campanas",
+    href: "/salud-y-vacunas",
     icon: "health",
   },
   {
-    label: "Derechos de los Animales",
-    desktopLabel: "Derechos",
-    mobileLabel: "Derechos",
-    href: "/derechos",
+    label: "Normativa",
+    desktopLabel: "Normativa",
+    mobileLabel: "Normativa",
+    href: "/normativa",
     icon: "legal",
   },
 ];
@@ -67,10 +67,10 @@ export const AUTH_COMPLAINTS_NAV_ITEM: NavItem = {
 // Mobile bottom bar displays the 5 primary destinations with SOS elevated in the center.
 const MOBILE_NAV_ORDER: readonly string[] = [
   "/",
-  "/mapa",
+  "/centros-de-atencion",
   "/denunciar",
-  "/campanas",
-  "/derechos",
+  "/salud-y-vacunas",
+  "/normativa",
 ];
 
 export const MOBILE_NAV_ITEMS: readonly NavItem[] = MOBILE_NAV_ORDER
@@ -82,9 +82,9 @@ export const FOOTER_LINK_GROUPS: readonly FooterLinkGroup[] = [
     title: "Servicios Públicos",
     links: [
       { label: "Inicio", href: "/" },
-      { label: "Centros de Atención", href: "/mapa" },
-      { label: "Salud y Vacunas", href: "/campanas" },
-      { label: "Derechos de los Animales", href: "/derechos" },
+      { label: "Centros de Atención", href: "/centros-de-atencion" },
+      { label: "Salud y Vacunas", href: "/salud-y-vacunas" },
+      { label: "Normativa", href: "/normativa" },
     ],
   },
   {
@@ -92,7 +92,7 @@ export const FOOTER_LINK_GROUPS: readonly FooterLinkGroup[] = [
     links: [
       { label: "Denunciar Maltrato o Biocidio", href: "/denunciar" },
       { label: "Mis Denuncias Emitidas", href: "/mis-denuncias" },
-      { label: "Derechos y Normativa Vigente", href: "/derechos" },
+      { label: "Normativa y Derechos Vigentes", href: "/normativa" },
     ],
   },
 ];
