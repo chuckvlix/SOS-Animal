@@ -2019,7 +2019,7 @@ export default function ComplaintWizardIsland() {
 
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
                 <a
-                  href="/mapa"
+                  href="/centros-de-atencion"
                   className="text-xs font-semibold text-secondary-text no-underline hover:underline"
                 >
                   Ver Veterinarias y Zoonosis cercanas →

@@ -63,7 +63,7 @@ sos-animal-sucre/
 │   │   │   └── docs/          # PDFs estáticos: derechos, leyes oficiales y fichas educativas
 │   │   └── src/
 │   │       ├── layouts/       # MainLayout (Portal Ciudadano) y PanelLayout (Sidebar izquierdo Admin)
-│   │       ├── pages/         # /, /mapa, /campanas, /derechos, /login, /registro, /denunciar, /mis-denuncias, /panel/*
+│   │       ├── pages/         # /, /centros-de-atencion, /salud-y-vacunas, /normativa, /login, /registro, /denunciar, /mis-denuncias, /panel/*
 │   │       ├── islands/       # Componentes React: VetMap, ComplaintWizard (4 pasos), AdminPanel, AuthForms
 │   │       └── services/      # Cliente API, interceptores JWT y subida de fotografías a URLs pre-firmadas
 │   └── mobile/                # (Fase 2) Aplicación React Native + Expo
@@ -96,16 +96,21 @@ sos-animal-sucre/
 
 1. **Vistas Públicas Estáticas/Informativas vs. Vistas Protegidas:**
    * **Público (Sin Login — Portal Ciudadano con Navbar Superior):**
-     * **Portada (`/`)**: Orientación jurídica, ruta digital de 4 pasos y accesos rápidos.
-     * **Centros de Atención (`/mapa`)**: Catálogo tipado y mapa interactivo en Leaflet con dos secciones verificadas por la Universidad (1. CEMZOO y Centros de Atención Veterinaria, 2. Instituciones Públicas donde Denunciar el Maltrato Animal), con cálculo de distancia geolocalizada.
-     * **Salud y Campañas (`/campanas` — Estática)**: Calendario de vacunación recomendado para mascotas, importancia de sus controles veterinarios y salud general, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
-     * **Derechos de los Animales (`/derechos` — Estática)**: Resumen ciudadano de los derechos reconocidos, el marco penal y municipal, las obligaciones de tenencia responsable y las fichas jurídicas oficiales disponibles para descarga.
+     * **Portada (`/`)**: Orientación jurídica, ruta digital de 4 pasos, accesos rápidos y espacio proyectado para campañas lanzadas por la UPDS (carrusel, galería u otro formato).
+     * **Centros de Atención (`/centros-de-atencion`)**: Catálogo tipado y mapa interactivo en Leaflet con dos secciones verificadas por la Universidad (1. CEMZOO y Centros de Atención Veterinaria, 2. Instituciones Públicas donde Denunciar el Maltrato Animal), con cálculo de distancia geolocalizada.
+     * **Salud y Vacunas (`/salud-y-vacunas` — Estática)**: Calendario de vacunación recomendado para mascotas, importancia de sus controles veterinarios y salud general, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
+     * **Normativa (`/normativa` — Estática)**: Resumen ciudadano de los derechos reconocidos, el marco penal y municipal, las obligaciones de tenencia responsable y las fichas jurídicas oficiales disponibles para descarga.
    * **Protegido Ciudadano (Requiere JWT, `MainLayout.astro`):**
      * Asistente interactivo de denuncia en **4 pasos** (`/denunciar`) con Guard inmediato hacia `/login?next=/denunciar`.
      * Historial personal (`/mis-denuncias`) para continuar borradores o volver a descargar el PDF de denuncias emitidas.
    * **Protegido Superadministrador (Exclusivo rol `admin`, `PanelLayout.astro` con Sidebar Izquierdo):**
      * `/panel/denuncias`: Registro histórico y estadístico de las denuncias generadas en la plataforma (conteo por tipo/modalidad, consulta de casos y descarga de PDFs).
      * `/panel/usuarios`: Listado de usuarios registrados y asignación del rol `admin`.
+     * *Campañas UPDS (Módulo proyectado):* CRUD en el panel administrativo para que usuarios `admin` publiquen y gestionen campañas de la universidad visibles en la landing.
+   * **Lineamientos Abiertos de Evolución (Libertad Creativa por Módulo):**
+     * **Módulo de Identidad e Institucionalidad UPDS:** Agrupa la incorporación del logo de la UPDS en un lugar visible del header o del footer, junto con el espacio institucional ("Sobre nosotros" / iniciativa de la UPDS + nombres o contactos del equipo desarrollador). Queda a criterio del responsable implementarlo como pestaña/página independiente o como sección al final de la landing principal.
+     * **Denuncias y Normativa:** Evolucionar la experiencia de denuncias para incluir tarjetas informativas por cada subcategoría de delito y ajustar el formato del **Documento de Denuncia** a partir de un análisis más profundo de la normativa vigente.
+     * **Calidad UX/UI Transversal:** Aplicar mejoras estéticas, de contenido y de coherencia general en todas las páginas del proyecto.
 2. **Flujo Interactivo e Inmutable de la Denuncia (4 Pasos Ágiles):**
    * **Paso 1 (Tipificación del Hecho):** Selección interactiva de Tipo (`MALTRATO` o `BIOCIDIO`) y Modalidad específica en una misma vista ligera, mostrando automáticamente el fundamento legal aplicable.
    * **Paso 2 (Hechos, Ubicación y Anexo Fotográfico):** Fecha/hora, dirección, marcador opcional en mini-mapa Leaflet centrado en Sucre (+ botón GPS), relato del hecho y carga opcional de **1 a 3 fotografías** (`JPG/PNG/WEBP`). Se guarda en estado `BORRADOR` (`is_immutable = False`).
@@ -122,8 +127,8 @@ sos-animal-sucre/
 | Integrante | Rol | Módulo Asignado | Rama Backend (`apps/api`) | Rama Frontend (`apps/web`) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Integrante 1 (Tech Lead)** | Backend & LegalTech | Core, Auth (`ciudadano`/`admin`), Motor de Denuncias y PDF con Anexo Fotográfico | `feat/api-core-and-complaints` | `feat/web-legal-catalog` |
-| **Integrante 2** | Fullstack Dev | Centros de Atención (`/mapa`) y Geolocalización | *(Sin backend CRUD — catálogo tipado estático verificado)* | `feat/web-map-and-vets` |
-| **Integrante 3** | Frontend & UI Dev | Páginas Estáticas: Salud y Campañas (`/campanas`) y Derechos de los Animales (`/derechos`) | *(Sin backend CRUD — limpieza de `campaigns`/`norms`)* | `feat/web-static-campaigns-norms-education` |
+| **Integrante 2** | Fullstack Dev | Centros de Atención (`/centros-de-atencion`) y Geolocalización | *(Sin backend CRUD — catálogo tipado estático verificado)* | `feat/web-map-and-vets` |
+| **Integrante 3** | Frontend & UI Dev | Páginas Estáticas: Salud y Vacunas (`/salud-y-vacunas`) y Normativa (`/normativa`) | *(Sin backend CRUD — limpieza de `campaigns`/`norms`)* | `feat/web-static-campaigns-norms-education` |
 | **Integrante 4** | Frontend & UI Dev | Auth UI (`/login`, `/registro`), Asistente de 4 Pasos (`/denunciar`), `/mis-denuncias` y Panel Universitario (`/panel/denuncias`, `/panel/usuarios`) | `feat/auth-complaints-panel` | `feat/web-complaint-wizard-4steps` |
 
 ### Alcance Detallado por Integrante
@@ -134,10 +139,10 @@ sos-animal-sucre/
   * Endpoints del catálogo penal/municipal, creación/edición de denuncias en `BORRADOR`, congelamiento inmutable al emitir (`ENVIADA`), código `SOS-XXXXXX-2026` y renderizado del **Documento de Denuncia en PDF** con `WeasyPrint` incluyendo el **Anexo Fotográfico** en la última hoja.
 * **Integrante 2 (Centros de Atención y Geolocalización en Sucre):**
   * Catálogo tipado y verificado en `src/data/centers.ts` con coordenadas exactas, horarios, teléfonos y fotografías oficiales extraídas del informe universitario.
-  * Página pública `/mapa` en Astro con isla interactiva Leaflet (`CentersMapIsland`), dividida en dos secciones: (1) CEMZOO y atención veterinaria con emergencias 24h, y (2) Instituciones públicas receptoras de denuncias (Fiscalía y FELCEDA-POFOMA), con cálculo de distancia geolocalizada y enlaces directos a Google Maps.
+  * Página pública `/centros-de-atencion` en Astro con isla interactiva Leaflet (`CentersMapIsland`), dividida en dos secciones: (1) CEMZOO y atención veterinaria con emergencias 24h, y (2) Instituciones públicas receptoras de denuncias (Fiscalía y FELCEDA-POFOMA), con cálculo de distancia geolocalizada y enlaces directos a Google Maps.
 * **Integrante 3 (Páginas Estáticas de Salud, Biblioteca Normativa y Educación por Público):**
-  * Página estática `/campanas` en Astro: calendario de vacunación recomendado para perros y gatos, guía sobre la importancia del cuidado y controles veterinarios, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
-  * Página estática `/derechos` en Astro: derechos reconocidos por ley, marco penal, obligaciones de tenencia responsable y descarga de fichas educativas y normativa oficial disponible desde `public/docs/derechos/`.
+  * Página estática `/salud-y-vacunas` en Astro: calendario de vacunación recomendado para perros y gatos, guía sobre la importancia del cuidado y controles veterinarios, y fechas aproximadas de las campañas gratuitas municipales de vacunación antirrábica y esterilización.
+  * Página estática `/normativa` en Astro: derechos reconocidos por ley, marco penal, obligaciones de tenencia responsable y descarga de fichas educativas y normativa oficial disponible desde `public/docs/derechos/`.
 * **Integrante 4 (Asistente Interactivo de 4 Pasos, Auth UI y Panel Universitario):**
   * Pantallas de Login (`/login`), Registro ligero (`/registro`), `MainLayout.astro` (con botón explícito `Cerrar sesión`) y `PanelLayout.astro` (con **sidebar izquierdo** exclusivo para `/panel/*`).
   * Isla de React para el **Asistente de Denuncia en 4 pasos (`/denunciar`)**, optimizado para móvil (interactivo y sin saturación visual): tipificación unificada, mini-mapa Leaflet en Sucre, carga de 1 a 3 fotos para el Anexo Fotográfico, previsualización y descarga del PDF.

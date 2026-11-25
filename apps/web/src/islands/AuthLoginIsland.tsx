@@ -345,7 +345,7 @@ export default function AuthLoginIsland() {
                 No necesitas iniciar sesión para consultar Zoonosis y clínicas veterinarias cercanas en Sucre.
               </p>
               <a
-                href="/mapa"
+                href="/centros-de-atencion"
                 className="mt-3 inline-flex min-h-[40px] items-center rounded-lg border border-border bg-bg-canvas px-3.5 py-2 text-xs font-semibold text-text-primary no-underline transition-colors hover:bg-primary-soft hover:text-primary"
               >
                 Explorar mapa veterinario

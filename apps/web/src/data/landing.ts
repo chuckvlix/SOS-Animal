@@ -18,7 +18,7 @@ export const HERO_CONTENT: HeroContent = {
   },
   secondaryCta: {
     label: "Ver Veterinarias y Zoonosis",
-    href: "/mapa",
+    href: "/centros-de-atencion",
   },
   image: {
     src: "/images/hero-pets.webp",
@@ -42,7 +42,7 @@ export const ABOUT_MISSION_CONTENT: AboutMissionContent = {
   ],
   cta: {
     label: "Conocer marco legal",
-    href: "/derechos",
+    href: "/normativa",
   },
   image: {
     src: "/images/about-mission-960.webp",
@@ -99,7 +99,7 @@ export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
     title: "Centros de atención veterinaria y dónde denunciar",
     description:
       "Consulta el mapa interactivo con CEMZOO, clínicas veterinarias con urgencias e instituciones públicas receptoras de denuncias en Sucre.",
-    href: "/mapa",
+    href: "/centros-de-atencion",
     ctaLabel: "Explorar centros de atención",
     accent: "secondary",
     image: {
@@ -114,7 +114,7 @@ export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
     title: "Vacunación antirrábica y esterilización",
     description:
       "Revisa fechas, requisitos y puntos de atención de campañas preventivas junto a CEMZOO e instituciones locales.",
-    href: "/campanas",
+    href: "/salud-y-vacunas",
     ctaLabel: "Ver calendario de campañas",
     accent: "secondary",
     image: {
@@ -125,12 +125,12 @@ export const COMMUNITY_HIGHLIGHTS: readonly CommunityHighlight[] = [
     },
   },
   {
-    category: "Derechos de los Animales",
+    category: "Normativa",
     title: "Derechos, responsabilidades y normativa vigente",
     description:
       "Conoce los derechos reconocidos por ley, las obligaciones de tenencia responsable y los documentos oficiales disponibles.",
-    href: "/derechos",
-    ctaLabel: "Conocer derechos y normativa",
+    href: "/normativa",
+    ctaLabel: "Conocer normativa y derechos",
     accent: "primary",
     image: {
       src: "/images/community-education.webp",
